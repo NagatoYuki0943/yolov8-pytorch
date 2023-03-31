@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 
-def autopad(k, p=None, d=1):  
+def autopad(k, p=None, d=1):
     # kernel, padding, dilation
     # 对输入的特征层进行自动padding，按照Same原则
     if d > 1:
@@ -13,15 +13,15 @@ def autopad(k, p=None, d=1):
         p = k // 2 if isinstance(k, int) else [x // 2 for x in k]
     return p
 
-class SiLU(nn.Module):  
+class SiLU(nn.Module):
     # SiLU激活函数
     @staticmethod
     def forward(x):
         return x * torch.sigmoid(x)
-    
+
 class Conv(nn.Module):
     # 标准卷积+标准化+激活函数
-    default_act = SiLU() 
+    default_act = SiLU()
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
         super().__init__()
         self.conv   = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
@@ -45,14 +45,32 @@ class Bottleneck(nn.Module):
         self.add = shortcut and c1 == c2
 
     def forward(self, x):
-        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))    
+        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
+#-----------------------------------------------#
+#                   in
+#                   │
+#                cv1(1x1)
+#                   │
+#          ┌──────split──────┐
+#          │                 ├─────────┐
+#          │                 │  m_1(Bottleneck)
+#          │                 │         ├────────┐
+#          │                 │         │ m_2(Bottleneck)
+#          │                 │         │        ├ ─ ─ ─ ─ ┐
+#          │                 │         │        │  m_3(Bottleneck)...
+#          └─────concat──────┴─────────┴────────┘─ ─ ─ ─ ─┘
+#                   │
+#                cv2(1X1)
+#                   │
+#                  out
+#-----------------------------------------------#
 class C2f(nn.Module):
     # CSPNet结构结构，大残差结构
     # c1为输入通道数，c2为输出通道数
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
         super().__init__()
-        self.c      = int(c2 * e) 
+        self.c      = int(c2 * e)
         self.cv1    = Conv(c1, 2 * self.c, 1, 1)
         self.cv2    = Conv((2 + n) * self.c, c2, 1)
         self.m      = nn.ModuleList(Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
@@ -63,7 +81,25 @@ class C2f(nn.Module):
         # 每进行一次残差结构都保留，然后堆叠在一起，密集残差
         y.extend(m(y[-1]) for m in self.m)
         return self.cv2(torch.cat(y, 1))
-    
+
+#-----------------------------------------------#
+#   SPP
+#               in
+#                │
+#             cv1(1x1)
+#                │
+#          ┌─────┴─────┐
+#          │      MaxPool2d(5x5)
+#          │           ├───────┐
+#          │           │  MaxPool2d(5x5) 等价9x9
+#          │           │       ├───────┐
+#          │           │       │  MaxPool2d(5x5) 等价13x13
+#          └───concat──┴───────┴───────┘
+#                │
+#             cv2(1x1)
+#                │
+#               out
+#-----------------------------------------------#
 class SPPF(nn.Module):
     # SPP结构，5、9、13最大池化核的最大池化。
     def __init__(self, c1, c2, k=5):
@@ -87,7 +123,7 @@ class Backbone(nn.Module):
         #-----------------------------------------------#
         # 3, 640, 640 => 32, 640, 640 => 64, 320, 320
         self.stem = Conv(3, base_channels, 3, 2)
-        
+
         # 64, 320, 320 => 128, 160, 160 => 128, 160, 160
         self.dark2 = nn.Sequential(
             Conv(base_channels, base_channels * 2, 3, 2),
@@ -109,7 +145,7 @@ class Backbone(nn.Module):
             C2f(int(base_channels * 16 * deep_mul), int(base_channels * 16 * deep_mul), base_depth, True),
             SPPF(int(base_channels * 16 * deep_mul), int(base_channels * 16 * deep_mul), k=5)
         )
-        
+
         if pretrained:
             url = {
                 "n" : 'https://github.com/bubbliiiing/yolov8-pytorch/releases/download/v1.0/yolov8_n_backbone_weights.pth',
@@ -140,4 +176,47 @@ class Backbone(nn.Module):
         #-----------------------------------------------#
         x = self.dark5(x)
         feat3 = x
+
+        #-----------------------------------------------#
+        #   feat1: 256, 80, 80
+        #   feat2: 512, 40, 40
+        #   feat3: 1024 * deep_mul, 20, 20
+        #-----------------------------------------------#
         return feat1, feat2, feat3
+
+
+if __name__ == "__main__":
+    phi = "l"
+    depth_dict          = {'n' : 0.33, 's' : 0.33, 'm' : 0.67, 'l' : 1.00, 'x' : 1.00,}
+    width_dict          = {'n' : 0.25, 's' : 0.50, 'm' : 0.75, 'l' : 1.00, 'x' : 1.25,}
+    deep_width_dict     = {'n' : 1.00, 's' : 1.00, 'm' : 0.75, 'l' : 0.50, 'x' : 0.50,}
+    dep_mul, wid_mul, deep_mul = depth_dict[phi], width_dict[phi], deep_width_dict[phi]
+
+    base_channels       = int(wid_mul * 64)  # 64
+    base_depth          = max(round(dep_mul * 3), 1)  # 3
+
+    model = Backbone(base_channels, base_depth, deep_mul, phi, pretrained=True)
+    x = torch.ones(1, 3, 640, 640)
+
+    model.eval()
+    with torch.inference_mode():
+        model(x)
+
+    if False:
+        onnx_path = "backbone-l.onnx"
+        torch.onnx.export(model,
+                          x,
+                          onnx_path,
+                          input_names=['image'],
+                         )
+        import onnx
+        from onnxsim import simplify
+
+        # 载入onnx模型
+        model_ = onnx.load(onnx_path)
+
+        # 简化模型
+        model_simple, check = simplify(model_)
+        assert check, "Simplified ONNX model could not be validated"
+        onnx.save(model_simple, onnx_path)
+        print('finished exporting ' + onnx_path)
