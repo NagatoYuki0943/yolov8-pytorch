@@ -33,7 +33,7 @@ def fuse_conv_and_bn(conv, bn):
 
 class DFL(nn.Module):
     # DFL模块
-    # Distribution Focal Loss (DFL) proposed in Generalized Focal Loss https://ieeexplore.ieee.org/document/9792391
+    # Distribution Focal Loss (DFL) proposed in Generalized Focal Loss https://ieeexplore.ieee.org/document/9792391 https://arxiv.org/abs/2006.04388
     def __init__(self, c1=16):
         super().__init__()
         self.conv   = nn.Conv2d(c1, 1, 1, bias=False).requires_grad_(False)
@@ -42,9 +42,9 @@ class DFL(nn.Module):
         self.c1     = c1
 
     def forward(self, x):
-        # bs, self.reg_max * 4, 8400
-        b, c, a = x.shape
-        # bs, 4, self.reg_max, 8400 => bs, self.reg_max, 4, 8400 => b, 4, 8400
+        # [B, self.reg_max * 4, 8400]
+        b, c, a = x.shape          #  view                         transpose                       softmax                         conv                view
+        # [B, self.reg_max * 4, 8400] => [B, 4, self.reg_max, 8400] => [B, self.reg_max, 4, 8400] => [B, self.reg_max, 4, 8400] => [B, 1, 4, 8400] => [B, 4, 8400]
         # 以softmax的方式，对0~16的数字计算百分比，获得最终数字。
         return self.conv(x.view(b, 4, self.c1, a).transpose(2, 1).softmax(1)).view(b, 4, a)
         # return self.conv(x.view(b, self.c1, 4, a).softmax(1)).view(b, 4, a)
@@ -69,28 +69,28 @@ class YoloBody(nn.Module):
         #---------------------------------------------------#
         #   生成主干模型
         #   获得三个有效特征层，他们的shape分别是：
-        #   256, 80, 80
-        #   512, 40, 40
-        #   1024 * deep_mul, 20, 20
+        #   [B, 256, 80, 80]
+        #   [B, 512, 40, 40]
+        #   [B, 1024 * deep_mul, 20, 20]
         #---------------------------------------------------#
         self.backbone   = Backbone(base_channels, base_depth, deep_mul, phi, pretrained=pretrained)
 
         #------------------------加强特征提取网络------------------------#
         self.upsample   = nn.Upsample(scale_factor=2, mode="nearest")
 
-        # 1024 * deep_mul + 512, 40, 40 => 512, 40, 40
+        # [B, 1024 * deep_mul] + [B, 512, 40, 40] => [B, 512, 40, 40]
         self.conv3_for_upsample1    = C2f(int(base_channels * 16 * deep_mul) + base_channels * 8, base_channels * 8, base_depth, shortcut=False)
-        # 768, 80, 80 => 256, 80, 80
+        # [B, 768, 80, 80] => [B, 256, 80, 80]
         self.conv3_for_upsample2    = C2f(base_channels * 8 + base_channels * 4, base_channels * 4, base_depth, shortcut=False)
 
-        # 256, 80, 80 => 256, 40, 40
+        # [B, 256, 80, 80] => [B, 256, 40, 40]
         self.down_sample1           = Conv(base_channels * 4, base_channels * 4, 3, 2)
-        # 512 + 256, 40, 40 => 512, 40, 40
+        # [B, 512 + 256, 40, 40] => [B, 512, 40, 40]
         self.conv3_for_downsample1  = C2f(base_channels * 8 + base_channels * 4, base_channels * 8, base_depth, shortcut=False)
 
-        # 512, 40, 40 => 512, 20, 20
+        # [B, 512, 40, 40] => [B, 512, 20, 20]
         self.down_sample2           = Conv(base_channels * 8, base_channels * 8, 3, 2)
-        # 1024 * deep_mul + 512, 20, 20 =>  1024 * deep_mul, 20, 20
+        # [B, 1024 * deep_mul] + [B, 512, 20, 20] =>  [B, 1024 * deep_mul, 20, 20]
         self.conv3_for_downsample2  = C2f(int(base_channels * 16 * deep_mul) + base_channels * 8, int(base_channels * 16 * deep_mul), base_depth, shortcut=False)
         #------------------------加强特征提取网络------------------------#
 
@@ -104,10 +104,11 @@ class YoloBody(nn.Module):
         self.num_classes = num_classes
 
         c2, c3   = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], num_classes)  # channels
+        # box
         self.cv2 = nn.ModuleList(nn.Sequential(Conv(x, c2, 3), Conv(c2, c2, 3), nn.Conv2d(c2, 4 * self.reg_max, 1)) for x in ch)
+        # cls
         self.cv3 = nn.ModuleList(nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, num_classes, 1)) for x in ch)
         self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
-
 
     def fuse(self):
         print('Fusing layers... ')
@@ -122,79 +123,100 @@ class YoloBody(nn.Module):
         #---------------------------------------------------#
         #   backbone
         #   获得三个有效特征层，他们的shape分别是：
-        #   256, 80, 80
-        #   512, 40, 40
-        #   1024 * deep_mul, 20, 20
+        #   [B, 256, 80, 80]
+        #   [B, 512, 40, 40]
+        #   [B, 1024 * deep_mul, 20, 20]
         #---------------------------------------------------#
         feat1, feat2, feat3 = self.backbone.forward(x)
 
         #------------------------加强特征提取网络------------------------#
-        # 1024 * deep_mul, 20, 20 => 1024 * deep_mul, 40, 40
+        # [B, 1024 * deep_mul, 20, 20] => [B, 1024 * deep_mul, 40, 40]
         P5_upsample = self.upsample(feat3)
-        # 1024 * deep_mul, 40, 40 cat 512, 40, 40 => 1024 * deep_mul + 512, 40, 40
+        # [B, 1024 * deep_mul, 40, 40] cat [B, 512, 40, 40] => [B, 1024 * deep_mul + 512, 40, 40]
         P4          = torch.cat([P5_upsample, feat2], 1)
-        # 1024 * deep_mul + 512, 40, 40 => 512, 40, 40
+        # [B, 1024 * deep_mul + [512, 40, 40] =>[B, 512, 40, 40]
         P4          = self.conv3_for_upsample1(P4)
 
-        # 512, 40, 40 => 512, 80, 80
+        # [B, 512, 40, 40] => [B, 512, 80, 80]
         P4_upsample = self.upsample(P4)
-        # 512, 80, 80 cat 256, 80, 80 => 768, 80, 80
+        # [B, 512, 80, 80] cat [B, 256, 80, 80] => [B, 768, 80, 80]
         P3          = torch.cat([P4_upsample, feat1], 1)
-        # 768, 80, 80 => 256, 80, 80
+        # [B, 768, 80, 80] => [B, 256, 80, 80]
         P3_out      = self.conv3_for_upsample2(P3)
 
-        # 256, 80, 80 => 256, 40, 40
+        # [B, 256, 80, 80] => [B, 256, 40, 40]
         P3_downsample = self.down_sample1(P3_out)
-        # 512, 40, 40 cat 256, 40, 40 => 768, 40, 40
+        # [B, 512, 40, 40] cat [B, 256, 40, 40] => [B, 768, 40, 40]
         P4 = torch.cat([P3_downsample, P4], 1)
-        # 768, 40, 40 => 512, 40, 40
+        # [B, 768, 40, 40] => [B, 512, 40, 40]
         P4_out = self.conv3_for_downsample1(P4)
 
-        # 512, 40, 40 => 512, 20, 20
+        # [B, 512, 40, 40] => [B, 512, 20, 20]
         P4_downsample = self.down_sample2(P4_out)
-        # 512, 20, 20 cat 1024 * deep_mul, 20, 20 => 1024 * deep_mul + 512, 20, 20
+        # [B, 512, 20, 20] cat [B, 1024 * deep_mul, 20, 20] => [B, 1024 * deep_mul + 512, 20, 20]
         P5 = torch.cat([P4_downsample, feat3], 1)
-        # 1024 * deep_mul + 512, 20, 20 => 1024 * deep_mul, 20, 20
+        # [B, 1024 * deep_mul + 512, 20, 20] => [B, 1024 * deep_mul, 20, 20]
         P5_out = self.conv3_for_downsample2(P5)
         #------------------------加强特征提取网络------------------------#
-        # P3_out 256, 80, 80
-        # P4_out 512, 40, 40
-        # P5_out 1024 * deep_mul, 20, 20
+        # P3_out [B, 256, 80, 80]
+        # P4_out [B, 512, 40, 40]
+        # P5_out [B, 1024 * deep_mul, 20, 20]
         shape = P3_out.shape  # BCHW
 
-        # P3_out 256, 80, 80 => num_classes + self.reg_max * 4, 80, 80
-        # P4_out 512, 40, 40 => num_classes + self.reg_max * 4, 40, 40
-        # P5_out 1024 * deep_mul, 20, 20 => num_classes + self.reg_max * 4, 20, 20
+        # 将每层的box和cls输出拼接起来
+        # P3_out [B, 256, 80, 80]             => [B, reg_max * 4 + num_classes, 80, 80]
+        # P4_out [B, 512, 40, 40]             => [B, reg_max * 4 + num_classes, 40, 40]
+        # P5_out [B, 1024 * deep_mul, 20, 20] => [B, reg_max * 4 + num_classes, 20, 20]
         x = [P3_out, P4_out, P5_out]
         for i in range(self.nl):
+            # cv2: box => [B, reg_max * 4, 80, 80]
+            # cv3: cls => [B, num_classes, 80, 80]
             x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
 
         if self.shape != shape:
             self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
             self.shape = shape
 
-        # num_classes + self.reg_max * 4 , 8400 =>  cls num_classes, 8400;
-        #                                           box self.reg_max * 4, 8400
+        # 将不同层的box和cls分别拼接到一起
+        # 依次取出每层的输出,然后在最后维度拼接,之后在第1个维度分离出box和cls
+        # [B, reg_max * 4 + num_classes, 8400] => box: [B, reg_max * 4, 8400]   8400 = 80 * 80 + 40 * 40 + 20 * 20
+        #                                         cls: [B, num_classes, 8400]
         box, cls        = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2).split((self.reg_max * 4, self.num_classes), 1)
         # origin_cls      = [xi.split((self.reg_max * 4, self.num_classes), 1)[1] for xi in x]
+
+        # 对box做DFL处理,每个位置保留一个框
+        # [B, reg_max * 4, 8400] -> [B, 4, 8400]
         dbox            = self.dfl(box)
+
+        #-------------------------------------------------------------------------------------------#
+        #   dbox:    [B, 4, 8400]     box detect
+        #   cls:     [B, 80, 8400]    cls detect
+        #   x:       [[B, 144, 80, 80], [B, 144, 40, 40], [B, 144, 20, 20]]   [P3_out, P4_out, P5_out]
+        #   anchors: [2, 8400]
+        #   strides: [1, 8400]
+        #-------------------------------------------------------------------------------------------#
         return dbox, cls, x, self.anchors.to(dbox.device), self.strides.to(dbox.device)
 
 
 if __name__ == "__main__":
     model = YoloBody(input_shape=[640, 640], num_classes=80, phi="l")
-    x = torch.ones(1, 3, 640, 640)
+    x = torch.ones(4, 3, 640, 640)
 
     model.eval()
     with torch.inference_mode():
         dbox, cls, x, anchors, strides = model(x)
-    print(dbox.shape)     # [1, 4, 8400]
-    print(cls.shape)      # [1, 80, 8400]
-    print(x[0].shape)     # [1, 144, 80, 80]
-    print(x[1].shape)     # [1, 144, 40, 40]
-    print(x[2].shape)     # [1, 144, 20, 20]
+    print(dbox.shape)     # [B, 4, 8400]
+    print(cls.shape)      # [B, 80, 8400]
+    print(x[0].shape)     # [B, 144, 80, 80]  144 = reg_max * 4 + num_classes = 16 * 4 + 80
+    print(x[1].shape)     # [B, 144, 40, 40]
+    print(x[2].shape)     # [B, 144, 20, 20]
     print(anchors.shape)  # [2, 8400]
     print(strides.shape)  # [1, 8400]
+    print(anchors[:2, :5])
+    # [[0.5000, 1.5000, 2.5000, 3.5000, 4.5000]
+    #  [0.5000, 0.5000, 0.5000, 0.5000, 0.5000]]
+    print(strides[:, :5])
+    # [[8., 8., 8., 8., 8.]]
 
     if False:
         onnx_path = "yolov8l.onnx"

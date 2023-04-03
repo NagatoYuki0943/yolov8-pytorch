@@ -74,8 +74,8 @@ class YOLO(object):
         self.__dict__.update(self._defaults)
         for name, value in kwargs.items():
             setattr(self, name, value)
-            self._defaults[name] = value 
-            
+            self._defaults[name] = value
+
         #---------------------------------------------------#
         #   获得种类和先验框的数量
         #---------------------------------------------------#
@@ -100,7 +100,7 @@ class YOLO(object):
         #   建立yolo模型，载入yolo模型的权重
         #---------------------------------------------------#
         self.net    = YoloBody(self.input_shape, self.num_classes, self.phi)
-        
+
         device      = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.net.load_state_dict(torch.load(self.model_path, map_location=device))
         self.net    = self.net.fuse().eval()
@@ -140,21 +140,29 @@ class YOLO(object):
                 images = images.cuda()
             #---------------------------------------------------------#
             #   将图像输入网络当中进行预测！
+            #   outputs:
+            #       dbox:    [B, 4, 8400]     box detect
+            #       cls:     [B, 80, 8400]    cls detect
+            #       x:       [[B, 144, 80, 80], [B, 144, 40, 40], [B, 144, 20, 20]]   [P3_out, P4_out, P5_out] 预测时没用到
+            #       anchors: [2, 8400]
+            #       strides: [1, 8400]
             #---------------------------------------------------------#
             outputs = self.net(images)
+            #   outputs:     [B, 8400, 84]  84: xywh + classes
             outputs = self.bbox_util.decode_box(outputs)
             #---------------------------------------------------------#
             #   将预测框进行堆叠，然后进行非极大抑制
+            #   results:    [[all_det, 6]]  6 代表 x1, y1, x2, y2, class_conf, class_pred
             #---------------------------------------------------------#
-            results = self.bbox_util.non_max_suppression(outputs, self.num_classes, self.input_shape, 
+            results = self.bbox_util.non_max_suppression(outputs, self.num_classes, self.input_shape,
                         image_shape, self.letterbox_image, conf_thres = self.confidence, nms_thres = self.nms_iou)
-                                                    
-            if results[0] is None: 
+
+            if results[0] is None:
                 return image
 
-            top_label   = np.array(results[0][:, 5], dtype = 'int32')
-            top_conf    = results[0][:, 4]
-            top_boxes   = results[0][:, :4]
+            top_label   = np.array(results[0][:, 5], dtype = 'int32') # [all_det]
+            top_conf    = results[0][:, 4]                            # [all_det]
+            top_boxes   = results[0][:, :4]                           # [all_det, 4]
         #---------------------------------------------------------#
         #   设置字体与边框厚度
         #---------------------------------------------------------#
@@ -182,7 +190,7 @@ class YOLO(object):
                 left    = max(0, np.floor(left).astype('int32'))
                 bottom  = min(image.size[1], np.floor(bottom).astype('int32'))
                 right   = min(image.size[0], np.floor(right).astype('int32'))
-                
+
                 dir_save_path = "img_crop"
                 if not os.path.exists(dir_save_path):
                     os.makedirs(dir_save_path)
@@ -192,10 +200,10 @@ class YOLO(object):
         #---------------------------------------------------------#
         #   图像绘制
         #---------------------------------------------------------#
-        for i, c in list(enumerate(top_label)):
-            predicted_class = self.class_names[int(c)]
-            box             = top_boxes[i]
-            score           = top_conf[i]
+        for i, c in list(enumerate(top_label)): # 按照每个label循环
+            predicted_class = self.class_names[int(c)] # 类型名
+            box             = top_boxes[i]             # [4]
+            score           = top_conf[i]              # score
 
             top, left, bottom, right = box
 
@@ -209,7 +217,7 @@ class YOLO(object):
             label_size = draw.textsize(label, font)
             label = label.encode('utf-8')
             print(label, top, left, bottom, right)
-            
+
             if top - label_size[1] >= 0:
                 text_origin = np.array([left, top - label_size[1]])
             else:
@@ -252,9 +260,9 @@ class YOLO(object):
             #---------------------------------------------------------#
             #   将预测框进行堆叠，然后进行非极大抑制
             #---------------------------------------------------------#
-            results = self.bbox_util.non_max_suppression(outputs, self.num_classes, self.input_shape, 
+            results = self.bbox_util.non_max_suppression(outputs, self.num_classes, self.input_shape,
                         image_shape, self.letterbox_image, conf_thres = self.confidence, nms_thres = self.nms_iou)
-                                                    
+
         t1 = time.time()
         for _ in range(test_interval):
             with torch.no_grad():
@@ -266,9 +274,9 @@ class YOLO(object):
                 #---------------------------------------------------------#
                 #   将预测框进行堆叠，然后进行非极大抑制
                 #---------------------------------------------------------#
-                results = self.bbox_util.non_max_suppression(outputs, self.num_classes, self.input_shape, 
+                results = self.bbox_util.non_max_suppression(outputs, self.num_classes, self.input_shape,
                             image_shape, self.letterbox_image, conf_thres = self.confidence, nms_thres = self.nms_iou)
-                                
+
         t2 = time.time()
         tact_time = (t2 - t1) / test_interval
         return tact_time
@@ -303,7 +311,7 @@ class YOLO(object):
             #---------------------------------------------------------#
             dbox, cls, x, anchors, strides = self.net(images)
             outputs = [xi.split((xi.size()[1] - self.num_classes, self.num_classes), 1)[1] for xi in x]
-        
+
         plt.imshow(image, alpha=1)
         plt.axis('off')
         mask    = np.zeros((image.size[1], image.size[0]))
@@ -315,7 +323,7 @@ class YOLO(object):
             score      = cv2.resize(score, (image.size[0], image.size[1]))
             normed_score    = (score * 255).astype('uint8')
             mask            = np.maximum(mask, normed_score)
-            
+
         plt.imshow(mask, alpha=0.5, interpolation='nearest', cmap="jet")
 
         plt.axis('off')
@@ -332,7 +340,7 @@ class YOLO(object):
         im                  = torch.zeros(1, 3, *self.input_shape).to('cpu')  # image size(1, 3, 512, 512) BCHW
         input_layer_names   = ["images"]
         output_layer_names  = ["output"]
-        
+
         # Export the model
         print(f'Starting export with onnx {onnx.__version__}.')
         torch.onnx.export(self.net,
@@ -364,7 +372,7 @@ class YOLO(object):
         print('Onnx model save as {}'.format(model_path))
 
     def get_map_txt(self, image_id, image, class_names, map_out_path):
-        f = open(os.path.join(map_out_path, "detection-results/"+image_id+".txt"), "w", encoding='utf-8') 
+        f = open(os.path.join(map_out_path, "detection-results/"+image_id+".txt"), "w", encoding='utf-8')
         image_shape = np.array(np.shape(image)[0:2])
         #---------------------------------------------------------#
         #   在这里将图像转换成RGB图像，防止灰度图在预测时报错。
@@ -393,11 +401,11 @@ class YOLO(object):
             #---------------------------------------------------------#
             #   将预测框进行堆叠，然后进行非极大抑制
             #---------------------------------------------------------#
-            results = self.bbox_util.non_max_suppression(outputs, self.num_classes, self.input_shape, 
+            results = self.bbox_util.non_max_suppression(outputs, self.num_classes, self.input_shape,
                         image_shape, self.letterbox_image, conf_thres = self.confidence, nms_thres = self.nms_iou)
-                                                    
-            if results[0] is None: 
-                return 
+
+            if results[0] is None:
+                return
 
             top_label   = np.array(results[0][:, 5], dtype = 'int32')
             top_conf    = results[0][:, 4]
@@ -415,4 +423,4 @@ class YOLO(object):
             f.write("%s %s %s %s %s %s\n" % (predicted_class, score[:6], str(int(left)), str(int(top)), str(int(right)),str(int(bottom))))
 
         f.close()
-        return 
+        return

@@ -30,8 +30,8 @@ def select_candidates_in_gts(xy_centers, gt_bboxes, eps=1e-9, roll_out=False):
                                        dim=2).view(n_boxes, n_anchors, -1).amin(2).gt_(eps)
         return bbox_deltas
     else:
-        # 真实框的坐上右下left-top, right-bottom 
-        lt, rb      = gt_bboxes.view(-1, 1, 4).chunk(2, 2)  
+        # 真实框的坐上右下left-top, right-bottom
+        lt, rb      = gt_bboxes.view(-1, 1, 4).chunk(2, 2)
         # 真实框距离每个anchors锚点的左上右下的距离
         bbox_deltas = torch.cat((xy_centers[None] - lt, rb - xy_centers[None]), dim=2).view(bs, n_boxes, n_anchors, -1)
         # return (bbox_deltas.min(3)[0] > eps).to(gt_bboxes.dtype)
@@ -53,19 +53,19 @@ def select_highest_overlaps(mask_pos, overlaps, n_max_boxes):
     # b, n_max_boxes, 8400 -> b, 8400
     fg_mask = mask_pos.sum(-2)
     # 如果有一个anchor被指派去预测多个真实框
-    if fg_mask.max() > 1:  
+    if fg_mask.max() > 1:
         # b, n_max_boxes, 8400
-        mask_multi_gts      = (fg_mask.unsqueeze(1) > 1).repeat([1, n_max_boxes, 1])  
+        mask_multi_gts      = (fg_mask.unsqueeze(1) > 1).repeat([1, n_max_boxes, 1])
         # 如果有一个anchor被指派去预测多个真实框，首先计算这个anchor最重合的真实框
         # 然后做一个onehot
         # b, 8400
-        max_overlaps_idx    = overlaps.argmax(1)  
+        max_overlaps_idx    = overlaps.argmax(1)
         # b, 8400, n_max_boxes
-        is_max_overlaps     = F.one_hot(max_overlaps_idx, n_max_boxes)  
+        is_max_overlaps     = F.one_hot(max_overlaps_idx, n_max_boxes)
         # b, n_max_boxes, 8400
-        is_max_overlaps     = is_max_overlaps.permute(0, 2, 1).to(overlaps.dtype)  
+        is_max_overlaps     = is_max_overlaps.permute(0, 2, 1).to(overlaps.dtype)
         # b, n_max_boxes, 8400
-        mask_pos            = torch.where(mask_multi_gts, is_max_overlaps, mask_pos) 
+        mask_pos            = torch.where(mask_multi_gts, is_max_overlaps, mask_pos)
         fg_mask             = mask_pos.sum(-2)
     # 找到每个anchor符合哪个gt
     target_gt_idx = mask_pos.argmax(-2)  # (b, h*w)
@@ -103,13 +103,13 @@ class TaskAlignedAssigner(nn.Module):
             target_scores (Tensor)  : shape(bs, num_total_anchors, num_classes)
             fg_mask (Tensor)        : shape(bs, num_total_anchors)
         """
-        # 获得batch_size 
+        # 获得batch_size
         self.bs             = pd_scores.size(0)
         # 获得真实框中的最大框数量
         self.n_max_boxes    = gt_bboxes.size(1)
         # 如果self.n_max_boxes大于self.roll_out_thr则roll_out
         self.roll_out       = self.n_max_boxes > self.roll_out_thr if self.roll_out_thr else False
-    
+
         if self.n_max_boxes == 0:
             device = gt_bboxes.device
             return (torch.full_like(pd_scores[..., 0], self.bg_idx).to(device), torch.zeros_like(pd_bboxes).to(device),
@@ -137,7 +137,7 @@ class TaskAlignedAssigner(nn.Module):
         align_metric        *= mask_pos
         # 每个真实框对应的最大得分
         # b, max_num_obj
-        pos_align_metrics   = align_metric.amax(axis=-1, keepdim=True) 
+        pos_align_metrics   = align_metric.amax(axis=-1, keepdim=True)
         # 每个真实框对应的最大重合度
         # b, max_num_obj
         pos_overlaps        = (overlaps * mask_pos).amax(axis=-1, keepdim=True)
@@ -153,17 +153,17 @@ class TaskAlignedAssigner(nn.Module):
         # pd_bboxes bs, num_total_anchors, 4
         # gt_labels bs, n_max_boxes, 1
         # gt_bboxes bs, n_max_boxes, 4
-        # 
+        #
         # align_metric是一个算出来的代价值，某个先验点属于某个真实框的类的概率乘上某个先验点与真实框的重合程度
         # overlaps是某个先验点与真实框的重合程度
         # align_metric, overlaps    bs, max_num_obj, 8400
         align_metric, overlaps  = self.get_box_metrics(pd_scores, pd_bboxes, gt_labels, gt_bboxes)
-        
+
         # 正样本锚点需要同时满足：
         # 1、在真实框内
         # 2、是真实框topk最重合的正样本
         # 3、满足mask_gt
-        
+
         # get in_gts mask           b, max_num_obj, 8400
         # 判断先验点是否在真实框内
         mask_in_gts             = select_candidates_in_gts(anc_points, gt_bboxes, roll_out=self.roll_out)
@@ -185,23 +185,23 @@ class TaskAlignedAssigner(nn.Module):
                 ind_0[:], ind_2 = b, gt_labels[b].squeeze(-1).long()
                 # 获得属于这个类别的得分
                 # bs, max_num_obj, 8400
-                bbox_scores     = pd_scores[ind_0, :, ind_2]  
+                bbox_scores     = pd_scores[ind_0, :, ind_2]
                 # 计算真实框和预测框的ciou
                 # bs, max_num_obj, 8400
                 overlaps[b]     = bbox_iou(gt_bboxes[b].unsqueeze(1), pd_bboxes[b].unsqueeze(0), xywh=False, CIoU=True).squeeze(2).clamp(0)
                 align_metric[b] = bbox_scores.pow(self.alpha) * overlaps[b].pow(self.beta)
         else:
             # 2, b, max_num_obj
-            ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)       
-            # b, max_num_obj  
+            ind = torch.zeros([2, self.bs, self.n_max_boxes], dtype=torch.long)
+            # b, max_num_obj
             # [0]代表第几个图片的
-            ind[0] = torch.arange(end=self.bs).view(-1, 1).repeat(1, self.n_max_boxes)  
+            ind[0] = torch.arange(end=self.bs).view(-1, 1).repeat(1, self.n_max_boxes)
             # [1]真是标签是什么
-            ind[1] = gt_labels.long().squeeze(-1) 
+            ind[1] = gt_labels.long().squeeze(-1)
             # 获得属于这个类别的得分
             # 取出某个先验点属于某个类的概率
             # b, max_num_obj, 8400
-            bbox_scores = pd_scores[ind[0], :, ind[1]]  
+            bbox_scores = pd_scores[ind[0], :, ind[1]]
 
             # 计算真实框和预测框的ciou
             # bs, max_num_obj, 8400
@@ -216,7 +216,7 @@ class TaskAlignedAssigner(nn.Module):
             topk_mask   : (b, max_num_obj, topk) or None
         """
         # 8400
-        num_anchors             = metrics.shape[-1] 
+        num_anchors             = metrics.shape[-1]
         # b, max_num_obj, topk
         topk_metrics, topk_idxs = torch.topk(metrics, self.topk, dim=-1, largest=largest)
         if topk_mask is None:
@@ -253,7 +253,7 @@ class TaskAlignedAssigner(nn.Module):
         target_labels   = gt_labels.long().flatten()[target_gt_idx]
         # b, h*w, 4 用于flatten后读取box
         target_bboxes   = gt_bboxes.view(-1, 4)[target_gt_idx]
-        
+
         # assigned target scores
         target_labels.clamp(0)
         # 进行one_hot映射到训练需要的形式。
@@ -366,13 +366,13 @@ def xywh2xyxy(x):
 
 # Criterion class for computing training losses
 class Loss:
-    def __init__(self, model): 
+    def __init__(self, model):
         self.bce    = nn.BCEWithLogitsLoss(reduction='none')
         self.stride = model.stride  # model strides
         self.nc     = model.num_classes  # number of classes
         self.no     = model.no
         self.reg_max = model.reg_max
-        
+
         self.use_dfl = model.reg_max > 1
         roll_out_thr = 64
 
@@ -389,7 +389,7 @@ class Loss:
             out = torch.zeros(batch_size, 0, 5, device=targets.device)
         else:
             # 获得图像索引
-            i           = targets[:, 0]  
+            i           = targets[:, 0]
             _, counts   = i.unique(return_counts=True)
             out         = torch.zeros(batch_size, counts.max(), 5, device=targets.device)
             # 对batch进行循环，然后赋值
@@ -405,7 +405,7 @@ class Loss:
     def bbox_decode(self, anchor_points, pred_dist):
         if self.use_dfl:
             # batch, anchors, channels
-            b, a, c     = pred_dist.shape  
+            b, a, c     = pred_dist.shape
             # DFL的解码
             pred_dist   = pred_dist.view(b, a, 4, c // 4).softmax(3).matmul(self.proj.to(pred_dist.device).type(pred_dist.dtype))
             # pred_dist = pred_dist.view(b, a, c // 4, 4).transpose(2,3).softmax(3).matmul(self.proj.type(pred_dist.dtype))
@@ -414,16 +414,30 @@ class Loss:
         return dist2bbox(pred_dist, anchor_points, xywh=False)
 
     def __call__(self, preds, batch):
+        """
+        Args:
+            preds:
+                dbox:    [B, 4, 8400]     box detect
+                cls:     [B, 80, 8400]    cls detect
+                x:       [[B, 144, 80, 80], [B, 144, 40, 40], [B, 144, 20, 20]]   [P3_out, P4_out, P5_out]
+                anchors: [2, 8400]
+                strides: [1, 8400]
+
+        Returns:
+        """
         # 获得使用的device
         device  = preds[1].device
         # box, cls, dfl三部分的损失
-        loss    = torch.zeros(3, device=device)  
+        loss    = torch.zeros(3, device=device)
         # 获得特征，并进行划分
+        # [[B, 144, 80, 80], [B, 144, 40, 40], [B, 144, 20, 20]]
         feats   = preds[2] if isinstance(preds, tuple) else preds
+        # [B, self.reg_max * 4 + num_classes, 8400] => box: [B, self.reg_max * 4, 8400]   8400 = 80 * 80 + 40 * 40 + 20 * 20
+        #                                              cls: [B, num_classes, 8400]
         pred_distri, pred_scores = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split((self.reg_max * 4, self.nc), 1)
 
-        # bs, num_classes + self.reg_max * 4 , 8400 =>  cls bs, num_classes, 8400; 
-        #                                               box bs, self.reg_max * 4, 8400
+        # [B, num_classes + self.reg_max * 4 , 8400] =>  cls [B, num_classes, 8400]
+        #                                                box [B, self.reg_max * 4, 8400]
         pred_scores = pred_scores.permute(0, 2, 1).contiguous()
         pred_distri = pred_distri.permute(0, 2, 1).contiguous()
 
@@ -431,7 +445,7 @@ class Loss:
         dtype       = pred_scores.dtype
         batch_size  = pred_scores.shape[0]
         # 获得输入图片大小
-        imgsz       = torch.tensor(feats[0].shape[2:], device=device, dtype=dtype) * self.stride[0]  
+        imgsz       = torch.tensor(feats[0].shape[2:], device=device, dtype=dtype) * self.stride[0]
         # 获得anchors点和步长对应的tensor
         anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
 
@@ -487,7 +501,7 @@ def is_parallel(model):
 def de_parallel(model):
     # De-parallelize a model: returns single-GPU model if model is of type DP or DDP
     return model.module if is_parallel(model) else model
-    
+
 def copy_attr(a, b, include=(), exclude=()):
     # Copy attributes from b to a, options to only include [...] and to exclude [...]
     for k, v in b.__dict__.items():

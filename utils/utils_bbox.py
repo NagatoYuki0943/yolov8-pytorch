@@ -28,41 +28,70 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
     return torch.cat(anchor_points), torch.cat(stride_tensor)
 
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
-    """Transform distance(ltrb) to box(xywh or xyxy)."""
-    # 左上右下
+    """Transform distance(ltrb) to box(xywh or xyxy).
+        将预测值换换位坐标
+    params:
+        distance:      [B, 4, 8400]
+        anchor_points: [1, 2, 8400]
+    return:
+        还原的坐标宽高  [B, 4, 8400]
+    """
+    # 左上右下 dim=1
+    # [B, 4, 8400] -> [B, 2, 8400] and [B, 2, 8400]
     lt, rb  = torch.split(distance, 2, dim)
+    # 中心点 - 左上 = 左上坐标 [B, 2, 8400]
+    # 中心点 + 右下 = 右下坐标 [B, 2, 8400]
     x1y1    = anchor_points - lt
     x2y2    = anchor_points + rb
     if xywh:
         c_xy    = (x1y1 + x2y2) / 2
         wh      = x2y2 - x1y1
         return torch.cat((c_xy, wh), dim)  # xywh bbox
-    return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
+    # [B, 4, 8400]
+    return torch.cat((x1y1, x2y2), dim)    # xyxy bbox
 
 class DecodeBox():
     def __init__(self, num_classes, input_shape):
         super(DecodeBox, self).__init__()
         self.num_classes    = num_classes
         self.bbox_attrs     = 4 + num_classes
-        self.input_shape    = input_shape
-        
-    def decode_box(self, inputs):
-        # dbox  batch_size, 4, 8400
-        # cls   batch_size, 20, 8400
+        self.input_shape    = input_shape   # [h, w] [640, 640]
+
+    def decode_box(self, inputs: list[torch.Tensor]):
+        #   inputs:
+        #       dbox:       [B, 4, 8400]     box detect
+        #       cls:        [B, 80, 8400]    cls detect
+        #       origin_cls: [[B, 144, 80, 80], [B, 144, 40, 40], [B, 144, 20, 20]]   [P3_out, P4_out, P5_out]
+        #       anchors:    [2, 8400]
+        #       strides:    [1, 8400]
         dbox, cls, origin_cls, anchors, strides = inputs
-        # 获得中心宽高坐标
+        # 获得中心宽高坐标:  [B, 4, 8400]
         dbox    = dist2bbox(dbox, anchors.unsqueeze(0), xywh=True, dim=1) * strides
+        # [B, 4, 8400] cat [B, 80, 8400] => [B, 84, 8400] => [B, 8400, 84]
         y       = torch.cat((dbox, cls.sigmoid()), 1).permute(0, 2, 1)
-        # 进行归一化，到0~1之间
+        # 位置进行归一化，到0~1之间 x/w, y/h
         y[:, :, :4] = y[:, :, :4] / torch.Tensor([self.input_shape[1], self.input_shape[0], self.input_shape[1], self.input_shape[0]]).to(y.device)
+        # [B, 8400, 84]  84: xywh + classes
         return y
 
-    def yolo_correct_boxes(self, box_xy, box_wh, input_shape, image_shape, letterbox_image):
+    def yolo_correct_boxes(self, box_xy: np.ndarray, box_wh: np.ndarray, input_shape: list[int], image_shape: list[int], letterbox_image: bool):
+        """将box还原到原图尺寸
+
+        Args:
+            box_xy (np.ndarray):     [all_det, 2]
+            box_wh (np.ndarray):     [all_det, 2]
+            input_shape (list[int]): [h, w]
+            image_shape (list[int]): [h, w]
+            letterbox_image (bool):  是否等比缩放图片
+
+        Returns:
+            np.ndarray: 还原到原图尺寸的boxes
+        """
         #-----------------------------------------------------------------#
         #   把y轴放前面是因为方便预测框和图像的宽高进行相乘
         #-----------------------------------------------------------------#
-        box_yx = box_xy[..., ::-1]
-        box_hw = box_wh[..., ::-1]
+        box_yx = box_xy[..., ::-1] # [all_det, 2]
+        box_hw = box_wh[..., ::-1] # [all_det, 2]
         input_shape = np.array(input_shape)
         image_shape = np.array(image_shape)
 
@@ -71,16 +100,18 @@ class DecodeBox():
             #   这里求出来的offset是图像有效区域相对于图像左上角的偏移情况
             #   new_shape指的是宽高缩放情况
             #-----------------------------------------------------------------#
-            new_shape = np.round(image_shape * np.min(input_shape/image_shape))
-            offset  = (input_shape - new_shape)/2./input_shape
-            scale   = input_shape/new_shape
+            new_shape = np.round(image_shape * np.min(input_shape / image_shape))
+            offset  = (input_shape - new_shape) / 2. / input_shape
+            scale   = input_shape / new_shape
 
             box_yx  = (box_yx - offset) * scale
             box_hw *= scale
 
-        box_mins    = box_yx - (box_hw / 2.)
-        box_maxes   = box_yx + (box_hw / 2.)
+        box_mins    = box_yx - (box_hw / 2.)  # xymin = yx - hw / 2
+        box_maxes   = box_yx + (box_hw / 2.)  # xymax = yx + hw / 2
+        # boxes: [all_det, 4]                  使用0:1,1:2可以防止维度减少
         boxes  = np.concatenate([box_mins[..., 0:1], box_mins[..., 1:2], box_maxes[..., 0:1], box_maxes[..., 1:2]], axis=-1)
+        # 缩放到原图大小 [all_det, 4]
         boxes *= np.concatenate([image_shape, image_shape], axis=-1)
         return boxes
 
@@ -88,44 +119,52 @@ class DecodeBox():
         #----------------------------------------------------------#
         #   将预测结果的格式转换成左上角右下角的格式。
         #   prediction  [batch_size, num_anchors, 85]
+        #               [B, 8400, 84]  84: xywh + classes
         #----------------------------------------------------------#
-        box_corner          = prediction.new(prediction.shape)
-        box_corner[:, :, 0] = prediction[:, :, 0] - prediction[:, :, 2] / 2
-        box_corner[:, :, 1] = prediction[:, :, 1] - prediction[:, :, 3] / 2
-        box_corner[:, :, 2] = prediction[:, :, 0] + prediction[:, :, 2] / 2
-        box_corner[:, :, 3] = prediction[:, :, 1] + prediction[:, :, 3] / 2
-        prediction[:, :, :4] = box_corner[:, :, :4]
+        # box_corner          = prediction.new(prediction.shape)
+        # box_corner[:, :, 0] = prediction[:, :, 0] - prediction[:, :, 2] / 2
+        # box_corner[:, :, 1] = prediction[:, :, 1] - prediction[:, :, 3] / 2
+        # box_corner[:, :, 2] = prediction[:, :, 0] + prediction[:, :, 2] / 2
+        # box_corner[:, :, 3] = prediction[:, :, 1] + prediction[:, :, 3] / 2
+        # prediction[:, :, :4] = box_corner[:, :, :4]
+        prediction[:, :, 0:2] -= prediction[:, :, 2:4] / 2  # center_x - 1 / 2 * w = x_min   center_y - 1 / 2 * h = y_min
+        prediction[:, :, 2:4] += prediction[:, :, 0:2]      # w + x_min = x_max              h + y_min = y_max
 
         output = [None for _ in range(len(prediction))]
         for i, image_pred in enumerate(prediction):
+            # image_pred: [8400, 84]
+
             #----------------------------------------------------------#
             #   对种类预测部分取max。
-            #   class_conf  [num_anchors, 1]    种类置信度
-            #   class_pred  [num_anchors, 1]    种类
+            #   class_conf  [8400, 1]    种类置信度
+            #   class_pred  [8400, 1]    种类
             #----------------------------------------------------------#
             class_conf, class_pred = torch.max(image_pred[:, 4:4 + num_classes], 1, keepdim=True)
 
             #----------------------------------------------------------#
             #   利用置信度进行第一轮筛选
+            #   conf_mask: [8400]
             #----------------------------------------------------------#
             conf_mask = (class_conf[:, 0] >= conf_thres).squeeze()
-            
+
             #----------------------------------------------------------#
             #   根据置信度进行预测结果的筛选
             #----------------------------------------------------------#
-            image_pred = image_pred[conf_mask]
-            class_conf = class_conf[conf_mask]
-            class_pred = class_pred[conf_mask]
+            image_pred = image_pred[conf_mask]  # [num_det, 84]
+            class_conf = class_conf[conf_mask]  # [num_det, 1]
+            class_pred = class_pred[conf_mask]  # [num_det, 1]
             if not image_pred.size(0):
                 continue
             #-------------------------------------------------------------------------#
-            #   detections  [num_anchors, 6]
+            #   [num_det, 4] cat [num_det, 1] cat [num_det, 1] = [num_det, 6]
+            #   detections [num_det, 6]
             #   6的内容为：x1, y1, x2, y2, class_conf, class_pred
             #-------------------------------------------------------------------------#
-            detections = torch.cat((image_pred[:, :4], class_conf.float(), class_pred.float()), 1)
+            detections = torch.cat((image_pred[:, :4], class_conf.float(), class_pred.float()), 1)  # class_conf.float() 不会改变维度,还是2维的
 
             #------------------------------------------#
             #   获得预测结果中包含的所有种类
+            #   [num_det, 6] get [num_det, -1] -> [unique_labels] like [0., 1., 2.]
             #------------------------------------------#
             unique_labels = detections[:, -1].cpu().unique()
 
@@ -136,19 +175,23 @@ class DecodeBox():
             for c in unique_labels:
                 #------------------------------------------#
                 #   获得某一类得分筛选后全部的预测结果
+                #   detections:       [num_det, 6]
+                #   detections_class: [num_det_single, 6]
                 #------------------------------------------#
                 detections_class = detections[detections[:, -1] == c]
                 #------------------------------------------#
                 #   使用官方自带的非极大抑制会速度更快一些！
                 #   筛选出一定区域内，属于同一种类得分最大的框
+                #   keep: [keep_index]
                 #------------------------------------------#
                 keep = nms(
-                    detections_class[:, :4],
-                    detections_class[:, 4],
-                    nms_thres
+                    detections_class[:, :4], # x1, y1, x2, y2
+                    detections_class[:, 4],  # class_conf
+                    nms_thres                # 重叠预知
                 )
+                # max_detections [keep_index, 6]
                 max_detections = detections_class[keep]
-                
+
                 # # 按照存在物体的置信度排序
                 # _, conf_sort_index = torch.sort(detections_class[:, 4]*detections_class[:, 5], descending=True)
                 # detections_class = detections_class[conf_sort_index]
@@ -163,16 +206,22 @@ class DecodeBox():
                 #     detections_class = detections_class[1:][ious < nms_thres]
                 # # 堆叠
                 # max_detections = torch.cat(max_detections).data
-                
+
                 # Add max detections to outputs
+                # [all_det, 6]
                 output[i] = max_detections if output[i] is None else torch.cat((output[i], max_detections))
-            
+            # [all_det, 6]
             if output[i] is not None:
+
                 output[i]           = output[i].cpu().numpy()
-                box_xy, box_wh      = (output[i][:, 0:2] + output[i][:, 2:4])/2, output[i][:, 2:4] - output[i][:, 0:2]
+                # box_xy = (box_x1y1 + box_x2y2) / 2  [all_det, 2]
+                # box_wh =  box_x2y2 - box_x1y1       [all_det, 2]
+                box_xy, box_wh      = (output[i][:, 0:2] + output[i][:, 2:4]) / 2, output[i][:, 2:4] - output[i][:, 0:2]
+                # [all_det, 4] = [all_det, 4] 还原到原图尺寸的boxes
                 output[i][:, :4]    = self.yolo_correct_boxes(box_xy, box_wh, input_shape, image_shape, letterbox_image)
+        # [[all_det, 6]]
         return output
-    
+
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
@@ -203,8 +252,8 @@ if __name__ == "__main__":
         scaled_anchors = [(anchor_width / stride_w, anchor_height / stride_h) for anchor_width, anchor_height in anchors[anchors_mask[2]]]
 
         #-----------------------------------------------#
-        #   batch_size, 3 * (4 + 1 + num_classes), 20, 20 => 
-        #   batch_size, 3, 5 + num_classes, 20, 20  => 
+        #   batch_size, 3 * (4 + 1 + num_classes), 20, 20 =>
+        #   batch_size, 3, 5 + num_classes, 20, 20  =>
         #   batch_size, 3, 20, 20, 4 + 1 + num_classes
         #-----------------------------------------------#
         prediction = input.view(batch_size, len(anchors_mask[2]),
@@ -213,13 +262,13 @@ if __name__ == "__main__":
         #-----------------------------------------------#
         #   先验框的中心位置的调整参数
         #-----------------------------------------------#
-        x = torch.sigmoid(prediction[..., 0])  
+        x = torch.sigmoid(prediction[..., 0])
         y = torch.sigmoid(prediction[..., 1])
         #-----------------------------------------------#
         #   先验框的宽高调整参数
         #-----------------------------------------------#
-        w = torch.sigmoid(prediction[..., 2]) 
-        h = torch.sigmoid(prediction[..., 3]) 
+        w = torch.sigmoid(prediction[..., 2])
+        h = torch.sigmoid(prediction[..., 3])
         #-----------------------------------------------#
         #   获得置信度，是否有物体 0 - 1
         #-----------------------------------------------#
@@ -233,20 +282,20 @@ if __name__ == "__main__":
         LongTensor  = torch.cuda.LongTensor if x.is_cuda else torch.LongTensor
 
         #----------------------------------------------------------#
-        #   生成网格，先验框中心，网格左上角 
+        #   生成网格，先验框中心，网格左上角
         #   batch_size,3,20,20
         #   range(20)
         #   [
-        #       [0, 1, 2, 3 ……, 19], 
-        #       [0, 1, 2, 3 ……, 19], 
+        #       [0, 1, 2, 3 ……, 19],
+        #       [0, 1, 2, 3 ……, 19],
         #       …… （20次）
         #       [0, 1, 2, 3 ……, 19]
         #   ] * (batch_size * 3)
         #   [batch_size, 3, 20, 20]
-        #   
+        #
         #   [
-        #       [0, 1, 2, 3 ……, 19], 
-        #       [0, 1, 2, 3 ……, 19], 
+        #       [0, 1, 2, 3 ……, 19],
+        #       [0, 1, 2, 3 ……, 19],
         #       …… （20次）
         #       [0, 1, 2, 3 ……, 19]
         #   ].T * (batch_size * 3)
@@ -274,7 +323,7 @@ if __name__ == "__main__":
         #   x  0 ~ 1 => 0 ~ 2 => -0.5 ~ 1.5 + grid_x
         #   y  0 ~ 1 => 0 ~ 2 => -0.5 ~ 1.5 + grid_y
         #   w  0 ~ 1 => 0 ~ 2 => 0 ~ 4 * anchor_w
-        #   h  0 ~ 1 => 0 ~ 2 => 0 ~ 4 * anchor_h 
+        #   h  0 ~ 1 => 0 ~ 2 => 0 ~ 4 * anchor_h
         #----------------------------------------------------------#
         pred_boxes          = FloatTensor(prediction[..., :4].shape)
         pred_boxes[..., 0]  = x.data * 2. - 0.5 + grid_x
@@ -284,18 +333,18 @@ if __name__ == "__main__":
 
         point_h = 5
         point_w = 5
-        
+
         box_xy          = pred_boxes[..., 0:2].cpu().numpy() * 32
         box_wh          = pred_boxes[..., 2:4].cpu().numpy() * 32
         grid_x          = grid_x.cpu().numpy() * 32
         grid_y          = grid_y.cpu().numpy() * 32
         anchor_w        = anchor_w.cpu().numpy() * 32
         anchor_h        = anchor_h.cpu().numpy() * 32
-        
+
         fig = plt.figure()
         ax  = fig.add_subplot(121)
         from PIL import Image
-        img = Image.open("img/street.jpg").resize([640, 640])
+        img = Image.open("../img/street.jpg").resize([640, 640])
         plt.imshow(img, alpha=0.5)
         plt.ylim(-30, 650)
         plt.xlim(-30, 650)
@@ -305,7 +354,7 @@ if __name__ == "__main__":
 
         anchor_left = grid_x - anchor_w / 2
         anchor_top  = grid_y - anchor_h / 2
-        
+
         rect1 = plt.Rectangle([anchor_left[0, 0, point_h, point_w],anchor_top[0, 0, point_h, point_w]], \
             anchor_w[0, 0, point_h, point_w],anchor_h[0, 0, point_h, point_w],color="r",fill=False)
         rect2 = plt.Rectangle([anchor_left[0, 1, point_h, point_w],anchor_top[0, 1, point_h, point_w]], \
