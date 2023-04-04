@@ -6,6 +6,7 @@ sys.path.append("../")
 
 from nets.backbone import Backbone, C2f, Conv, SiLU, autopad
 from nets.swin import Swin
+from nets.convnext import ConvNeXt
 from utils.utils_bbox import make_anchors
 
 def fuse_conv_and_bn(conv, bn):
@@ -78,7 +79,7 @@ class YoloBody(nn.Module):
             #---------------------------------------------------#
             self.backbone   = Backbone(base_channels, base_depth, deep_mul, phi, pretrained=pretrained)
 
-        elif phi in ['swin_t', 'swin_s', 'swin_b', 'swin_v2_t', 'swin_v2_s', 'swin_v2_b']:
+        elif 'swin' in phi or 'convnext' in phi:
             dep_mul, wid_mul, deep_mul = 1.00, 1.25, 0.50 # 使用x大小的参数
 
             base_channels   = int(wid_mul * 64)          # 64
@@ -86,10 +87,16 @@ class YoloBody(nn.Module):
             #-----------------------------------------------#
             #   输入图片是3, 640, 640
             #-----------------------------------------------#
-            self.backbone   = Swin(variance=phi, pretrained=pretrained)
-            feat1_in        = {'swin_t' : 192, 'swin_s' : 192, 'swin_b' : 256,  'swin_v2_t' : 192, 'swin_v2_s' : 192, 'swin_v2_b' : 256,}[phi]
-            feat2_in        = {'swin_t' : 384, 'swin_s' : 384, 'swin_b' : 512,  'swin_v2_t' : 384, 'swin_v2_s' : 384, 'swin_v2_b' : 512,}[phi]
-            feat3_in        = {'swin_t' : 768, 'swin_s' : 768, 'swin_b' : 1024, 'swin_v2_t' : 768, 'swin_v2_s' : 768, 'swin_v2_b' : 1024,}[phi]
+            if 'swin' in phi:
+                self.backbone = Swin(variance=phi, pretrained=pretrained)
+            elif 'convnext' in phi:
+                self.backbone = ConvNeXt(variance=phi, pretrained=pretrained)
+            feat1_in        = {'swin_t' : 192, 'swin_s' : 192, 'swin_b' : 256,  'swin_v2_t' : 192, 'swin_v2_s' : 192, 'swin_v2_b' : 256,
+                               'convnext_tiny' : 192,'convnext_small' : 192, 'convnext_base' : 256,  'convnext_large' : 384,}[phi]
+            feat2_in        = {'swin_t' : 384, 'swin_s' : 384, 'swin_b' : 512,  'swin_v2_t' : 384, 'swin_v2_s' : 384, 'swin_v2_b' : 512,
+                               'convnext_tiny' : 384, 'convnext_small' : 384, 'convnext_base' : 512,  'convnext_large' : 768,}[phi]
+            feat3_in        = {'swin_t' : 768, 'swin_s' : 768, 'swin_b' : 1024, 'swin_v2_t' : 768, 'swin_v2_s' : 768, 'swin_v2_b' : 1024,
+                               'convnext_tiny' : 768, 'convnext_small' : 768, 'convnext_base' : 1024, 'convnext_large' : 1536,}[phi]
             # 调整输出channel到符合BiFPN的输入channel
             self.for_feat1  = nn.Conv2d(feat1_in, base_channels * 4,  1)
             self.for_feat2  = nn.Conv2d(feat2_in, base_channels * 8,  1)
@@ -149,7 +156,7 @@ class YoloBody(nn.Module):
             #   [B, 1024 * deep_mul, 20, 20]
             #---------------------------------------------------#
             feat1, feat2, feat3 = self.backbone.forward(x)
-        elif self.phi in ['swin_t', 'swin_s', 'swin_b', 'swin_v2_t', 'swin_v2_s', 'swin_v2_b']:
+        elif 'swin' in self.phi or 'convnext' in self.phi:
             feat1, feat2, feat3 = self.backbone.forward(x)
             feat1 = self.for_feat1(feat1)
             feat2 = self.for_feat2(feat2)

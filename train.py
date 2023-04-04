@@ -99,12 +99,16 @@ if __name__ == "__main__":
     #                   m : 对应yolov8_m
     #                   l : 对应yolov8_l
     #                   x : 对应yolov8_x
-    #                   swin_t    : 对应 swin_t backbone    要将pretrained=True, model_path=''
-    #                   swin_s    : 对应 swin_s backbone    要将pretrained=True, model_path=''
-    #                   swin_b    : 对应 swin_b backbone    要将pretrained=True, model_path=''
-    #                   swin_v2_t : 对应 swin_v2_t backbone 要将pretrained=True, model_path=''
-    #                   swin_v2_s : 对应 swin_v2_s backbone 要将pretrained=True, model_path=''
-    #                   swin_v2_b : 对应 swin_v2_b backbone 要将pretrained=True, model_path=''
+    #                   swin_t    : 对应 swin_t backbone              要将pretrained=True, model_path=''
+    #                   swin_s    : 对应 swin_s backbone              要将pretrained=True, model_path=''
+    #                   swin_b    : 对应 swin_b backbone              要将pretrained=True, model_path=''
+    #                   swin_v2_t : 对应 swin_v2_t backbone           要将pretrained=True, model_path=''
+    #                   swin_v2_s : 对应 swin_v2_s backbone           要将pretrained=True, model_path=''
+    #                   swin_v2_b : 对应 swin_v2_b backbone           要将pretrained=True, model_path=''
+    #                   convnext_tiny  : 对应 convnext_tiny backbone  要将pretrained=True, model_path=''
+    #                   convnext_small : 对应 convnext_small backbone 要将pretrained=True, model_path=''
+    #                   convnext_base  : 对应 convnext_base backbone  要将pretrained=True, model_path=''
+    #                   convnext_large : 对应 convnext_large backbone 要将pretrained=True, model_path=''
     #------------------------------------------------------#
     phi             = 's'
     #----------------------------------------------------------------------------------------------------------------------------#

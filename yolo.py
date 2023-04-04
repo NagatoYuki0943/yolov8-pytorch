@@ -44,6 +44,10 @@ class YOLO(object):
         #   swin_v2_t : 对应 swin_v2_t backbone
         #   swin_v2_s : 对应 swin_v2_s backbone
         #   swin_v2_b : 对应 swin_v2_b backbone
+        #   convnext_tiny  : 对应 convnext_tiny backbone
+        #   convnext_small : 对应 convnext_small backbone
+        #   convnext_base  : 对应 convnext_base backbone
+        #   convnext_large : 对应 convnext_large backbone
         #------------------------------------------------------#
         "phi"               : 's',
         #---------------------------------------------------------------------#

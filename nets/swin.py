@@ -40,7 +40,8 @@ class Swin(nn.Module):
 
         return [feat1, feat2, feat3]
 
-# |       | t    | s    | b    |
+
+# | ch    | t    | s    | b    |
 # | ----- | ---- | ---- | ---- |
 # | feat1 | 192  | 192  | 256  |
 # | feat2 | 384  | 384  | 512  |
