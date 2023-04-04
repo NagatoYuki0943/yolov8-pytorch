@@ -97,7 +97,7 @@ class YoloBody(nn.Module):
                                'convnext_tiny' : 384, 'convnext_small' : 384, 'convnext_base' : 512,  'convnext_large' : 768,}[phi]
             feat3_in        = {'swin_t' : 768, 'swin_s' : 768, 'swin_b' : 1024, 'swin_v2_t' : 768, 'swin_v2_s' : 768, 'swin_v2_b' : 1024,
                                'convnext_tiny' : 768, 'convnext_small' : 768, 'convnext_base' : 1024, 'convnext_large' : 1536,}[phi]
-            # 调整输出channel到符合BiFPN的输入channel
+            # 调整输出channel到符合PANet的输入channel
             self.for_feat1  = nn.Conv2d(feat1_in, base_channels * 4,  1)
             self.for_feat2  = nn.Conv2d(feat2_in, base_channels * 8,  1)
             self.for_feat3  = nn.Conv2d(feat3_in, int(base_channels * 16 * deep_mul), 1)
