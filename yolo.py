@@ -38,6 +38,12 @@ class YOLO(object):
         #   m : 对应yolov8_m
         #   l : 对应yolov8_l
         #   x : 对应yolov8_x
+        #   swin_t    : 对应 swin_t backbone
+        #   swin_s    : 对应 swin_s backbone
+        #   swin_b    : 对应 swin_b backbone
+        #   swin_v2_t : 对应 swin_v2_t backbone
+        #   swin_v2_s : 对应 swin_v2_s backbone
+        #   swin_v2_b : 对应 swin_v2_b backbone
         #------------------------------------------------------#
         "phi"               : 's',
         #---------------------------------------------------------------------#

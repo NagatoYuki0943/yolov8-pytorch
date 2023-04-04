@@ -5,6 +5,7 @@ import sys
 sys.path.append("../")
 
 from nets.backbone import Backbone, C2f, Conv, SiLU, autopad
+from nets.swin import Swin
 from utils.utils_bbox import make_anchors
 
 def fuse_conv_and_bn(conv, bn):
@@ -55,25 +56,44 @@ class DFL(nn.Module):
 class YoloBody(nn.Module):
     def __init__(self, input_shape, num_classes, phi, pretrained=False):
         super(YoloBody, self).__init__()
-        depth_dict          = {'n' : 0.33, 's' : 0.33, 'm' : 0.67, 'l' : 1.00, 'x' : 1.00,}
-        width_dict          = {'n' : 0.25, 's' : 0.50, 'm' : 0.75, 'l' : 1.00, 'x' : 1.25,}
-        deep_width_dict     = {'n' : 1.00, 's' : 1.00, 'm' : 0.75, 'l' : 0.50, 'x' : 0.50,}
-        dep_mul, wid_mul, deep_mul = depth_dict[phi], width_dict[phi], deep_width_dict[phi]
+        self.phi = phi
+        if phi in ['n', 's', 'm', 'l', 'x']:
+            depth_dict          = {'n' : 0.33, 's' : 0.33, 'm' : 0.67, 'l' : 1.00, 'x' : 1.00,}
+            width_dict          = {'n' : 0.25, 's' : 0.50, 'm' : 0.75, 'l' : 1.00, 'x' : 1.25,}
+            deep_width_dict     = {'n' : 1.00, 's' : 1.00, 'm' : 0.75, 'l' : 0.50, 'x' : 0.50,}
+            dep_mul, wid_mul, deep_mul = depth_dict[phi], width_dict[phi], deep_width_dict[phi]
 
-        base_channels       = int(wid_mul * 64)  # 64
-        base_depth          = max(round(dep_mul * 3), 1)  # 3
-        #-----------------------------------------------#
-        #   输入图片是3, 640, 640
-        #-----------------------------------------------#
+            base_channels       = int(wid_mul * 64)          # 64
+            base_depth          = max(round(dep_mul * 3), 1) # 3
+            #-----------------------------------------------#
+            #   输入图片是3, 640, 640
+            #-----------------------------------------------#
 
-        #---------------------------------------------------#
-        #   生成主干模型
-        #   获得三个有效特征层，他们的shape分别是：
-        #   [B, 256, 80, 80]
-        #   [B, 512, 40, 40]
-        #   [B, 1024 * deep_mul, 20, 20]
-        #---------------------------------------------------#
-        self.backbone   = Backbone(base_channels, base_depth, deep_mul, phi, pretrained=pretrained)
+            #---------------------------------------------------#
+            #   生成主干模型
+            #   获得三个有效特征层，他们的shape分别是：
+            #   [B, 256, 80, 80]
+            #   [B, 512, 40, 40]
+            #   [B, 1024 * deep_mul, 20, 20]
+            #---------------------------------------------------#
+            self.backbone   = Backbone(base_channels, base_depth, deep_mul, phi, pretrained=pretrained)
+
+        elif phi in ['swin_t', 'swin_s', 'swin_b', 'swin_v2_t', 'swin_v2_s', 'swin_v2_b']:
+            dep_mul, wid_mul, deep_mul = 1.00, 1.25, 0.50 # 使用x大小的参数
+
+            base_channels   = int(wid_mul * 64)          # 64
+            base_depth      = max(round(dep_mul * 3), 1) # 3
+            #-----------------------------------------------#
+            #   输入图片是3, 640, 640
+            #-----------------------------------------------#
+            self.backbone   = Swin(variance=phi, pretrained=pretrained)
+            feat1_in        = {'swin_t' : 192, 'swin_s' : 192, 'swin_b' : 256,  'swin_v2_t' : 192, 'swin_v2_s' : 192, 'swin_v2_b' : 256,}[phi]
+            feat2_in        = {'swin_t' : 384, 'swin_s' : 384, 'swin_b' : 512,  'swin_v2_t' : 384, 'swin_v2_s' : 384, 'swin_v2_b' : 512,}[phi]
+            feat3_in        = {'swin_t' : 768, 'swin_s' : 768, 'swin_b' : 1024, 'swin_v2_t' : 768, 'swin_v2_s' : 768, 'swin_v2_b' : 1024,}[phi]
+            # 调整输出channel到符合BiFPN的输入channel
+            self.for_feat1  = nn.Conv2d(feat1_in, base_channels * 4,  1)
+            self.for_feat2  = nn.Conv2d(feat2_in, base_channels * 8,  1)
+            self.for_feat3  = nn.Conv2d(feat3_in, int(base_channels * 16 * deep_mul), 1)
 
         #------------------------加强特征提取网络------------------------#
         self.upsample   = nn.Upsample(scale_factor=2, mode="nearest")
@@ -120,14 +140,20 @@ class YoloBody(nn.Module):
         return self
 
     def forward(self, x):
-        #---------------------------------------------------#
-        #   backbone
-        #   获得三个有效特征层，他们的shape分别是：
-        #   [B, 256, 80, 80]
-        #   [B, 512, 40, 40]
-        #   [B, 1024 * deep_mul, 20, 20]
-        #---------------------------------------------------#
-        feat1, feat2, feat3 = self.backbone.forward(x)
+        if self.phi in ['n', 's', 'm', 'l', 'x']:
+            #---------------------------------------------------#
+            #   backbone
+            #   获得三个有效特征层，他们的shape分别是：
+            #   [B, 256, 80, 80]
+            #   [B, 512, 40, 40]
+            #   [B, 1024 * deep_mul, 20, 20]
+            #---------------------------------------------------#
+            feat1, feat2, feat3 = self.backbone.forward(x)
+        elif self.phi in ['swin_t', 'swin_s', 'swin_b', 'swin_v2_t', 'swin_v2_s', 'swin_v2_b']:
+            feat1, feat2, feat3 = self.backbone.forward(x)
+            feat1 = self.for_feat1(feat1)
+            feat2 = self.for_feat2(feat2)
+            feat3 = self.for_feat3(feat3)
 
         #------------------------加强特征提取网络------------------------#
         # [B, 1024 * deep_mul, 20, 20] => [B, 1024 * deep_mul, 40, 40]
@@ -199,7 +225,7 @@ class YoloBody(nn.Module):
 
 
 if __name__ == "__main__":
-    model = YoloBody(input_shape=[640, 640], num_classes=80, phi="l")
+    model = YoloBody(input_shape=[640, 640], num_classes=80, phi="x", pretrained=False)
     x = torch.ones(4, 3, 640, 640)
 
     model.eval()
@@ -219,7 +245,7 @@ if __name__ == "__main__":
     # [[8., 8., 8., 8., 8.]]
 
     if False:
-        onnx_path = "yolov8l.onnx"
+        onnx_path = "yolov8x.onnx"
         torch.onnx.export(model,
                           x,
                           onnx_path,

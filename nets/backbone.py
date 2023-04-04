@@ -186,7 +186,7 @@ class Backbone(nn.Module):
 
 
 if __name__ == "__main__":
-    phi = "l"
+    phi = "x"
     depth_dict          = {'n' : 0.33, 's' : 0.33, 'm' : 0.67, 'l' : 1.00, 'x' : 1.00,}
     width_dict          = {'n' : 0.25, 's' : 0.50, 'm' : 0.75, 'l' : 1.00, 'x' : 1.25,}
     deep_width_dict     = {'n' : 1.00, 's' : 1.00, 'm' : 0.75, 'l' : 0.50, 'x' : 0.50,}
@@ -195,15 +195,17 @@ if __name__ == "__main__":
     base_channels       = int(wid_mul * 64)  # 64
     base_depth          = max(round(dep_mul * 3), 1)  # 3
 
-    model = Backbone(base_channels, base_depth, deep_mul, phi, pretrained=True)
+    model = Backbone(base_channels, base_depth, deep_mul, phi, pretrained=False)
     x = torch.ones(1, 3, 640, 640)
 
     model.eval()
     with torch.inference_mode():
-        model(x)
+        feats = model(x)
+    for feat in feats:
+        print(feat.size())
 
     if False:
-        onnx_path = "backbone-l.onnx"
+        onnx_path = "backbone-x.onnx"
         torch.onnx.export(model,
                           x,
                           onnx_path,
