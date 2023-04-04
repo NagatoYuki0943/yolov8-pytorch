@@ -92,7 +92,7 @@ class YoloBody(nn.Module):
             elif 'convnext' in phi:
                 self.backbone = ConvNeXt(variance=phi, pretrained=pretrained)
             feat1_in        = {'swin_t' : 192, 'swin_s' : 192, 'swin_b' : 256,  'swin_v2_t' : 192, 'swin_v2_s' : 192, 'swin_v2_b' : 256,
-                               'convnext_tiny' : 192,'convnext_small' : 192, 'convnext_base' : 256,  'convnext_large' : 384,}[phi]
+                               'convnext_tiny' : 192, 'convnext_small' : 192, 'convnext_base' : 256,  'convnext_large' : 384,}[phi]
             feat2_in        = {'swin_t' : 384, 'swin_s' : 384, 'swin_b' : 512,  'swin_v2_t' : 384, 'swin_v2_s' : 384, 'swin_v2_b' : 512,
                                'convnext_tiny' : 384, 'convnext_small' : 384, 'convnext_base' : 512,  'convnext_large' : 768,}[phi]
             feat3_in        = {'swin_t' : 768, 'swin_s' : 768, 'swin_b' : 1024, 'swin_v2_t' : 768, 'swin_v2_s' : 768, 'swin_v2_b' : 1024,
