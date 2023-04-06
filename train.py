@@ -243,7 +243,7 @@ if __name__ == "__main__":
     #                   开启后会加快数据读取速度，但是会占用更多内存
     #                   内存较小的电脑可以设置为2或者0
     #------------------------------------------------------------------#
-    num_workers         = 4
+    num_workers         = 8
 
     #------------------------------------------------------#
     #   train_annotation_path   训练图片路径和标签
@@ -275,15 +275,15 @@ if __name__ == "__main__":
     class_names, num_classes = get_classes(classes_path)
 
     #----------------------------------------------------#
-    #   下载预训练权重
+    #   下载预训练权重,backbone中自动下载
     #----------------------------------------------------#
-    if pretrained:
-        if distributed:
-            if local_rank == 0:
-                download_weights(phi)
-            dist.barrier()
-        else:
-            download_weights(phi)
+    # if pretrained:
+    #     if distributed:
+    #         if local_rank == 0:
+    #             download_weights(phi)
+    #         dist.barrier()
+    #     else:
+    #         download_weights(phi)
 
     #------------------------------------------------------#
     #   创建yolo模型
@@ -489,7 +489,7 @@ if __name__ == "__main__":
 
         gen             = DataLoader(train_dataset, shuffle = shuffle, batch_size = batch_size, num_workers = num_workers, pin_memory=True,
                                     drop_last=True, collate_fn=yolo_dataset_collate, sampler=train_sampler)
-        gen_val         = DataLoader(val_dataset  , shuffle = shuffle, batch_size = batch_size, num_workers = num_workers, pin_memory=True, 
+        gen_val         = DataLoader(val_dataset  , shuffle = shuffle, batch_size = batch_size, num_workers = num_workers, pin_memory=True,
                                     drop_last=True, collate_fn=yolo_dataset_collate, sampler=val_sampler)
 
         #----------------------#
