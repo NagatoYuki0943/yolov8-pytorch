@@ -98,8 +98,8 @@ if __name__ == "__main__":
     #                   s : 对应yolov8_s
     #                   m : 对应yolov8_m
     #                   l : 对应yolov8_l
-    #                   x : 对应yolov8_x
-    #                   swin_t    : 对应 swin_t backbone              要将pretrained=True, model_path=''
+    #                   x : 对应yolov8_x                                                                   20 mins/epoch on 1080ti
+    #                   swin_t    : 对应 swin_t backbone              要将pretrained=True, model_path=''   53 mins/epoch on 1080ti
     #                   swin_s    : 对应 swin_s backbone              要将pretrained=True, model_path=''
     #                   swin_b    : 对应 swin_b backbone              要将pretrained=True, model_path=''
     #                   swin_v2_t : 对应 swin_v2_t backbone           要将pretrained=True, model_path=''
