@@ -4,7 +4,8 @@ import torch.nn as nn
 import sys
 sys.path.append("../")
 
-from nets.backbone import Backbone, C2f, Conv, SiLU, autopad
+from nets.backbone import Backbone, C2f, Conv
+from nets.yolo_training import weights_init
 from nets.swin import Swin
 from nets.convnext import ConvNeXt
 from utils.utils_bbox import make_anchors
@@ -135,6 +136,8 @@ class YoloBody(nn.Module):
         self.cv2 = nn.ModuleList(nn.Sequential(Conv(x, c2, 3), Conv(c2, c2, 3), nn.Conv2d(c2, 4 * self.reg_max, 1)) for x in ch)
         # cls
         self.cv3 = nn.ModuleList(nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, num_classes, 1)) for x in ch)
+        if not pretrained:
+            weights_init(self)
         self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
 
     def fuse(self):
