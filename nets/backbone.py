@@ -48,7 +48,7 @@ class Bottleneck(nn.Module):
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
 #-----------------------------------------------#
-#                   in
+#                  in
 #                   │
 #                cv1(1x1)
 #                   │
