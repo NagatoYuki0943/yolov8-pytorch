@@ -105,7 +105,9 @@ class SPPF(nn.Module):
     def __init__(self, c1, c2, k=5):
         super().__init__()
         c_          = c1 // 2
+        # 1x1Conv缩减通道
         self.cv1    = Conv(c1, c_, 1, 1)
+        # 1x1Conv调整最终通道
         self.cv2    = Conv(c_ * 4, c2, 1, 1)
         self.m      = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
 

@@ -30,13 +30,14 @@ def make_anchors(feats, strides, grid_cell_offset=0.5):
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
     """Transform distance(ltrb) to box(xywh or xyxy).
         将预测值换换位坐标
+            中心点 - 左上 = 左上坐标
+            中心点 + 右下 = 右下坐标
     params:
         distance:      [B, 4, 8400]
         anchor_points: [1, 2, 8400]
     return:
         还原的坐标宽高  [B, 4, 8400]
     """
-    # 左上右下 dim=1
     # [B, 4, 8400] -> [B, 2, 8400] and [B, 2, 8400]
     lt, rb  = torch.split(distance, 2, dim)
     # 中心点 - 左上 = 左上坐标 [B, 2, 8400]
@@ -58,6 +59,7 @@ class DecodeBox():
         self.input_shape    = input_shape   # [h, w] [640, 640]
 
     def decode_box(self, inputs: list[torch.Tensor]):
+        """解码box"""
         #   inputs:
         #       dbox:       [B, 4, 8400]     box detect
         #       cls:        [B, 80, 8400]    cls detect
@@ -101,7 +103,7 @@ class DecodeBox():
             #   new_shape指的是宽高缩放情况
             #-----------------------------------------------------------------#
             new_shape = np.round(image_shape * np.min(input_shape / image_shape))
-            offset  = (input_shape - new_shape) / 2. / input_shape
+            offset  = (input_shape - new_shape) / 2. / input_shape  # 偏移值,注意是归一化的
             scale   = input_shape / new_shape
 
             box_yx  = (box_yx - offset) * scale
@@ -112,6 +114,8 @@ class DecodeBox():
         # boxes: [all_det, 4]                  使用0:1,1:2可以防止维度减少
         boxes  = np.concatenate([box_mins[..., 0:1], box_mins[..., 1:2], box_maxes[..., 0:1], box_maxes[..., 1:2]], axis=-1)
         # 缩放到原图大小 [all_det, 4]
+        # 和图像的宽高进行相乘
+        # yxyx * hwhw
         boxes *= np.concatenate([image_shape, image_shape], axis=-1)
         return boxes
 
@@ -127,10 +131,18 @@ class DecodeBox():
         # box_corner[:, :, 2] = prediction[:, :, 0] + prediction[:, :, 2] / 2
         # box_corner[:, :, 3] = prediction[:, :, 1] + prediction[:, :, 3] / 2
         # prediction[:, :, :4] = box_corner[:, :, :4]
-        prediction[:, :, 0:2] -= prediction[:, :, 2:4] / 2  # center_x - 1 / 2 * w = x_min   center_y - 1 / 2 * h = y_min
-        prediction[:, :, 2:4] += prediction[:, :, 0:2]      # w + x_min = x_max              h + y_min = y_max
+        prediction[:, :, 0] -= prediction[:, :, 2] / 2  # x_min = center_x - 1 / 2 * w
+        prediction[:, :, 1] -= prediction[:, :, 3] / 2  # y_min = center_y - 1 / 2 * h
+        prediction[:, :, 2] += prediction[:, :, 0]      # x_max = w + x_min
+        prediction[:, :, 3] += prediction[:, :, 1]      # y_max = h + y_min
 
+        # [image1_result, image2_result...]
         output = [None for _ in range(len(prediction))]
+
+        #----------------------------------------------------------#
+        #   循环遍历图片
+        #   image_pred: [num_anchors, 85]
+        #----------------------------------------------------------#
         for i, image_pred in enumerate(prediction):
             # image_pred: [8400, 84]
 
@@ -143,7 +155,7 @@ class DecodeBox():
 
             #----------------------------------------------------------#
             #   利用置信度进行第一轮筛选
-            #   conf_mask: [8400]
+            #   conf_mask: [8400] [True, False...] num_det个True
             #----------------------------------------------------------#
             conf_mask = (class_conf[:, 0] >= conf_thres).squeeze()
 
@@ -160,7 +172,7 @@ class DecodeBox():
             #   detections [num_det, 6]
             #   6的内容为：x1, y1, x2, y2, class_conf, class_pred
             #-------------------------------------------------------------------------#
-            detections = torch.cat((image_pred[:, :4], class_conf.float(), class_pred.float()), 1)  # class_conf.float() 不会改变维度,还是2维的
+            detections = torch.cat((image_pred[:, :4], class_conf.float(), class_pred.float()), 1)
 
             #------------------------------------------#
             #   获得预测结果中包含的所有种类
@@ -187,7 +199,7 @@ class DecodeBox():
                 keep = nms(
                     detections_class[:, :4], # x1, y1, x2, y2
                     detections_class[:, 4],  # class_conf
-                    nms_thres                # 重叠预知
+                    nms_thres
                 )
                 # max_detections [keep_index, 6]
                 max_detections = detections_class[keep]
@@ -210,16 +222,26 @@ class DecodeBox():
                 # Add max detections to outputs
                 # [all_det, 6]
                 output[i] = max_detections if output[i] is None else torch.cat((output[i], max_detections))
-            # [all_det, 6]
-            if output[i] is not None:
 
+            #-----------------------------------------------#
+            #   调整会原图,删除灰色条
+            #   [all_det, 6]
+            #-----------------------------------------------#
+            if output[i] is not None:
                 output[i]           = output[i].cpu().numpy()
                 # box_xy = (box_x1y1 + box_x2y2) / 2  [all_det, 2]
                 # box_wh =  box_x2y2 - box_x1y1       [all_det, 2]
                 box_xy, box_wh      = (output[i][:, 0:2] + output[i][:, 2:4]) / 2, output[i][:, 2:4] - output[i][:, 0:2]
-                # [all_det, 4] = [all_det, 4] 还原到原图尺寸的boxes
+                # [all_det, :4] = [all_det, :4] 还原到原图尺寸的boxes
                 output[i][:, :4]    = self.yolo_correct_boxes(box_xy, box_wh, input_shape, image_shape, letterbox_image)
-        # [[all_det, 6]]
+
+        #-----------------------------------------------#
+        #   [
+        #     [all_det, 6],
+        #     [all_det, 6],
+        #     ...
+        #   ]
+        #-----------------------------------------------#
         return output
 
 

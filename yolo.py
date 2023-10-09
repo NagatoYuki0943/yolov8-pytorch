@@ -162,7 +162,11 @@ class YOLO(object):
             outputs = self.bbox_util.decode_box(outputs)
             #---------------------------------------------------------#
             #   将预测框进行堆叠，然后进行非极大抑制
-            #   results:    [[all_det, 6]]  6 代表 x1, y1, x2, y2, class_conf, class_pred
+            #   results: [
+            #     [all_det, 6],     # 6 代表 x1, y1, x2, y2, class_conf, class_pred
+            #     [all_det, 6],
+            #     ...
+            #   ]
             #---------------------------------------------------------#
             results = self.bbox_util.non_max_suppression(outputs, self.num_classes, self.input_shape,
                         image_shape, self.letterbox_image, conf_thres = self.confidence, nms_thres = self.nms_iou)
@@ -170,6 +174,7 @@ class YOLO(object):
             if results[0] is None:
                 return image
 
+            # 只取第一张图片
             top_label   = np.array(results[0][:, 5], dtype = 'int32') # [all_det]
             top_conf    = results[0][:, 4]                            # [all_det]
             top_boxes   = results[0][:, :4]                           # [all_det, 4]
