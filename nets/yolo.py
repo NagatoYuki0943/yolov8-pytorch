@@ -269,11 +269,12 @@ if __name__ == "__main__":
 
     if False:
         onnx_path = "yolov8x.onnx"
-        torch.onnx.export(model,
-                          x,
-                          onnx_path,
-                          input_names=['image'],
-                         )
+        torch.onnx.export(
+            model,
+            x,
+            onnx_path,
+            input_names=['image'],
+        )
         import onnx
         from onnxsim import simplify
 
