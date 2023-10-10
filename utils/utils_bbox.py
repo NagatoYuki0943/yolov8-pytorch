@@ -236,11 +236,12 @@ class DecodeBox():
                 output[i][:, :4]    = self.yolo_correct_boxes(box_xy, box_wh, input_shape, image_shape, letterbox_image)
 
         #-----------------------------------------------#
-        #   [
-        #     [all_det, 6],
-        #     [all_det, 6],
-        #     ...
-        #   ]
+        #   output = [ 每张图片
+        #               [ 每种类别
+        #                   [x1, y1, x2, y2, class_conf(种类置信度), class_pred(种类预测值)],
+        #                   ...
+        #               ]
+        #             ]
         #-----------------------------------------------#
         return output
 
