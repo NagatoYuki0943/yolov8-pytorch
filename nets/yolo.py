@@ -220,6 +220,8 @@ class YoloBody(nn.Module):
             x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
 
         if self.shape != shape:
+            # anchors: [8400, 2] -> [2, 8400]
+            # strides: [8400, 1] -> [1, 8400]
             self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
             self.shape = shape
 

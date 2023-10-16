@@ -14,27 +14,39 @@ def check_version(current: str = "0.0.0",
 TORCH_1_10 = check_version(torch.__version__, '1.10.0')
 
 def make_anchors(feats, strides, grid_cell_offset=0.5):
-    """Generate anchors from features."""
+    """Generate anchors from features.
+
+    Args:
+        feats (list[Tensor]): [[B, 144, 80, 80], [B, 144, 40, 40], [B, 144, 20, 20]]
+        strides (list[int]):  [8., 16., 32.]
+        grid_cell_offset (float, optional): 中心坐标偏移值,0.5意味着偏移到网格中心. Defaults to 0.5.
+
+    Returns:
+        tuple(Tensor): anchors, strides
+    """
     anchor_points, stride_tensor = [], []
     assert feats is not None
     dtype, device = feats[0].dtype, feats[0].device
     for i, stride in enumerate(strides):
         _, _, h, w  = feats[i].shape
-        sx          = torch.arange(end=w, device=device, dtype=dtype) + grid_cell_offset  # shift x
-        sy          = torch.arange(end=h, device=device, dtype=dtype) + grid_cell_offset  # shift y
-        sy, sx      = torch.meshgrid(sy, sx, indexing='ij') if TORCH_1_10 else torch.meshgrid(sy, sx)
-        anchor_points.append(torch.stack((sx, sy), -1).view(-1, 2))
-        stride_tensor.append(torch.full((h * w, 1), stride, dtype=dtype, device=device))
-    return torch.cat(anchor_points), torch.cat(stride_tensor)
+        sx          = torch.arange(end=w, device=device, dtype=dtype) + grid_cell_offset                # shift x [w]
+        sy          = torch.arange(end=h, device=device, dtype=dtype) + grid_cell_offset                # shift y [h]
+        sy, sx      = torch.meshgrid(sy, sx, indexing='ij') if TORCH_1_10 else torch.meshgrid(sy, sx)   # [h, w], [h, w]
+        # sx, sy      = torch.meshgrid(sx, sy, indexing='xy')                                           # 和上一行相同
+        anchor_points.append(torch.stack((sx, sy), -1).view(-1, 2))                                     # [h, w] stack [h, w] -> [h, w, 2] -> [h*w, 2]
+        stride_tensor.append(torch.full((h * w, 1), stride, dtype=dtype, device=device))                # [h*w, 1] full stride
+    return torch.cat(anchor_points), torch.cat(stride_tensor)   # [8400, 2], [8400, 1]
 
 def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
     """Transform distance(ltrb) to box(xywh or xyxy).
         将预测值换换位坐标
             中心点 - 左上 = 左上坐标
             中心点 + 右下 = 右下坐标
+
     params:
         distance:      [B, 4, 8400]
         anchor_points: [1, 2, 8400]
+
     return:
         还原的坐标宽高  [B, 4, 8400]
     """
@@ -59,13 +71,19 @@ class DecodeBox():
         self.input_shape    = input_shape   # [h, w] [640, 640]
 
     def decode_box(self, inputs: list[torch.Tensor]):
-        """解码box"""
-        #   inputs:
-        #       dbox:       [B, 4, 8400]     box detect
-        #       cls:        [B, 80, 8400]    cls detect
-        #       origin_cls: [[B, 144, 80, 80], [B, 144, 40, 40], [B, 144, 20, 20]]   [P3_out, P4_out, P5_out]
-        #       anchors:    [2, 8400]
-        #       strides:    [1, 8400]
+        """解码box
+
+        Args:
+            inputs (list[torch.Tensor]):
+                dbox:       [B, 4, 8400]     box detect
+                cls:        [B, 80, 8400]    cls detect
+                origin_cls: [[B, 144, 80, 80], [B, 144, 40, 40], [B, 144, 20, 20]]   [P3_out, P4_out, P5_out]
+                anchors:    [2, 8400]
+                strides:    [1, 8400]
+
+        Returns:
+            torch.Tensor
+        """
         dbox, cls, origin_cls, anchors, strides = inputs
         # 获得中心宽高坐标:  [B, 4, 8400]
         dbox    = dist2bbox(dbox, anchors.unsqueeze(0), xywh=True, dim=1) * strides
