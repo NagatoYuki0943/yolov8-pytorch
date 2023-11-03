@@ -229,8 +229,8 @@ class YOLO(object):
 
             label = '{} {:.2f}'.format(predicted_class, score)
             draw = ImageDraw.Draw(image)
-            label_size = draw.textsize(label, font) # [textwidth, textheight]
-            # label_size = draw.textsize(label, font), font.size # [textwidth, textheight] Pillow >= 10.0
+            # label_size = draw.textsize(label, font)               # [textwidth, textheight]
+            label_size = draw.textlength(label, font), font.size    # [textwidth, textheight] Pillow >= 10.0
             label = label.encode('utf-8')
             print(label, top, left, bottom, right)
 
