@@ -253,7 +253,8 @@ class YoloBody(nn.Module):
 
 
 if __name__ == "__main__":
-    model = YoloBody(input_shape=[640, 640], num_classes=80, phi="x", pretrained=False)
+    phi = "x"
+    model = YoloBody(input_shape=[640, 640], num_classes=80, phi=phi, pretrained=False)
     x = torch.ones(4, 3, 640, 640)
 
     model.eval()
@@ -273,11 +274,11 @@ if __name__ == "__main__":
     # [[8., 8., 8., 8., 8.]]
 
     if False:
-        onnx_path = "yolov8x.onnx"
+        onnx_path = f"yolov8{phi}.onnx"
         torch.onnx.export(
-            model,
-            x,
-            onnx_path,
+            model=model,
+            args=x,
+            f=onnx_path,
             input_names=['image'],
         )
         import onnx
