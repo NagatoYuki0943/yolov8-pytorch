@@ -197,6 +197,13 @@ if __name__ == "__main__":
     base_channels       = int(wid_mul * 64)  # 64
     base_depth          = max(round(dep_mul * 3), 1)  # 3
 
+    print(base_channels, base_depth, deep_mul, int(base_channels * 16 * deep_mul))
+    # n: 16 1 1.0  256
+    # s: 32 1 1.0  512
+    # m: 48 2 0.75 576
+    # l: 64 3 0.5  512
+    # x: 80 3 0.5  640
+
     model = Backbone(base_channels, base_depth, deep_mul, phi, pretrained=False)
     x = torch.ones(1, 3, 640, 640)
 
@@ -208,11 +215,14 @@ if __name__ == "__main__":
 
     if False:
         onnx_path = "backbone-x.onnx"
-        torch.onnx.export(model,
-                          x,
-                          onnx_path,
-                          input_names=['image'],
-                         )
+        torch.onnx.export(
+            model=model,
+            args=x,
+            f=onnx_path,
+            input_names=['image'],
+            output_names=['feat1', 'feat2', 'feat3'],
+            opset_version=17,
+        )
         import onnx
         from onnxsim import simplify
 
