@@ -196,16 +196,16 @@ class YoloBody(nn.Module):
         # [B, 256, 80, 80] => [B, 256, 40, 40]
         P3_downsample = self.down_sample1(P3_out)
         # [B, 512, 40, 40] cat [B, 256, 40, 40] => [B, 768, 40, 40]
-        P4 = torch.cat([P3_downsample, P4], 1)
+        P4            = torch.cat([P3_downsample, P4], 1)
         # [B, 768, 40, 40] => [B, 512, 40, 40]
-        P4_out = self.conv3_for_downsample1(P4)
+        P4_out        = self.conv3_for_downsample1(P4)
 
         # [B, 512, 40, 40] => [B, 512, 20, 20]
         P4_downsample = self.down_sample2(P4_out)
         # [B, 512, 20, 20] cat [B, 1024 * deep_mul, 20, 20] => [B, 1024 * deep_mul + 512, 20, 20]
-        P5 = torch.cat([P4_downsample, feat3], 1)
+        P5            = torch.cat([P4_downsample, feat3], 1)
         # [B, 1024 * deep_mul + 512, 20, 20] => [B, 1024 * deep_mul, 20, 20]
-        P5_out = self.conv3_for_downsample2(P5)
+        P5_out        = self.conv3_for_downsample2(P5)
         #------------------------加强特征提取网络------------------------#
         # P3_out [B, 256, 80, 80]
         # P4_out [B, 512, 40, 40]
