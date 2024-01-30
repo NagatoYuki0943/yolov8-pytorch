@@ -179,9 +179,9 @@ class YoloBody(nn.Module):
         self.shape      = None
         self.nl         = len(ch)
 
-        # stride = [8, 16, 32]
+        # stride: [ 8., 16., 32.]
         # self.stride     = torch.zeros(self.nl)
-        self.stride     = torch.tensor([640 / x.shape[-2] for x in self.backbone.forward(torch.zeros(1, 3, 640, 640))])  # forward
+        self.stride     = torch.tensor([input_shape[0] / x.shape[-2] for x in self.backbone.forward(torch.zeros(1, 3, *input_shape))])  # forward
 
         self.reg_max    = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
         self.no         = num_classes + self.reg_max * 4  # number of outputs per anchor
@@ -314,9 +314,9 @@ if __name__ == "__main__":
     if False:
         onnx_path = f"yolov8{phi}.onnx"
         torch.onnx.export(
-            model,
-            x,
-            onnx_path,
+            model=model,
+            args=x,
+            f=onnx_path,
             input_names=['image'],
         )
         import onnx
