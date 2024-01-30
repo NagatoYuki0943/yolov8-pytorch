@@ -136,8 +136,11 @@ class YoloBody(nn.Module):
         ch              = [base_channels * 4, base_channels * 8, int(base_channels * 16 * deep_mul)]
         self.shape      = None
         self.nl         = len(ch)
+
+        # stride: [ 8., 16., 32.]
         # self.stride     = torch.zeros(self.nl)
         self.stride     = torch.tensor([256 / x.shape[-2] for x in self.backbone.forward(torch.zeros(1, 3, 256, 256))])  # forward
+
         self.reg_max    = 16  # DFL channels (ch[0] // 16 to scale 4/8/12/16/20 for n/s/m/l/x)
         self.no         = num_classes + self.reg_max * 4  # number of outputs per anchor
         self.num_classes = num_classes
