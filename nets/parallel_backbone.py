@@ -219,6 +219,26 @@ class LayerScale(nn.Module):
         return x.mul_(gamma) if self.inplace else x * gamma
 
 
+#-----------------------------------------------#
+#   通道缩放
+#   [B, C, H, W] * [1, C, 1, 1] = [B, C, H, W]
+#-----------------------------------------------#
+class LayerScale2d(nn.Module):
+    def __init__(self, dim, init_values=1e-5, inplace=False):
+        super().__init__()
+        self.inplace = inplace
+        self.gamma = nn.Parameter(init_values * torch.ones(dim))
+
+    def forward(self, x):
+        gamma = self.gamma.view(1, -1, 1, 1)
+        return x.mul_(gamma) if self.inplace else x * gamma
+
+
+class GroupNorm1(nn.GroupNorm):
+    def __init__(self, num_channels: int, **kwargs) -> None:
+        super().__init__(1, num_channels, **kwargs)
+
+
 #------------------------------------#
 #   7x7DWConv -> 1x1Conv -> 1x1Conv
 #------------------------------------#
@@ -229,7 +249,7 @@ class ConvNeXtBlock(nn.Module):
         dim_out: int,
         stride: int = 1,
         layer_scale: float = 1e-5,
-        norm_layer = nn.LayerNorm,
+        norm_layer = GroupNorm1,
         activation_layer = nn.GELU,
     ) -> None:
         super().__init__()
@@ -240,16 +260,14 @@ class ConvNeXtBlock(nn.Module):
         self.block = nn.Sequential(
             # DWConv
             nn.Conv2d(dim_in, dim_out, kernel_size=7, stride=stride, padding=3, groups=groups, bias=True),  # [B, C, H, W] -> [B, C, H, W]
-            Permute([0, 2, 3, 1]),                                                                          # [B, C, H, W] -> [B, H, W, C]
             norm_layer(dim_out),        # LayerNorm 和 Linear 默认在最后通道计算
-            nn.Linear(in_features=dim_out, out_features=4 * dim_out, bias=True),                            # [B, H, W, C] -> [B, H, W,4C]
+            nn.Conv2d(dim_out, 4 * dim_out, kernel_size=1, bias=True),                                      # [B, C, H, W] -> [B, 4*C, H, W]
             activation_layer(),
-            nn.Linear(in_features=4 * dim_out, out_features=dim_out, bias=True),                            # [B, H, W,4C] -> [B, H, W, C]
-            LayerScale(dim_out, layer_scale),
-            Permute([0, 3, 1, 2]),                                                                          # [B, H, W, C] -> [B, C, H, W]
+            nn.Conv2d(4 * dim_out, dim_out, kernel_size=1, bias=True),                                      # [B, 4*C, H, W] -> [B, C, H, W]
+            LayerScale2d(dim_out, layer_scale),
         )
 
-        self.shortcut = nn.Conv2d(dim_in, dim_out, kernel_size=1, stride=stride) if (dim_in != dim_out) or stride != 1 else nn.Identity()
+        self.shortcut = nn.Sequential(nn.Conv2d(dim_in, dim_out, kernel_size=1, stride=stride), norm_layer(dim_out)) if (dim_in != dim_out) or stride != 1 else nn.Identity()
 
     def forward(self, input: Tensor) -> Tensor:
         result = self.block(input)
@@ -293,6 +311,46 @@ class Mlp(nn.Module):
         x = self.norm(x)
         x = self.fc2(x)     # [B, N, n*C] -> [B, N, C]
         x = self.drop2(x)
+        return x
+
+
+#-------------------------------------#
+#   1x1Conv代替全连接层
+#   宽高不为1,不是注意力
+#-------------------------------------#
+class ConvMlp(nn.Module):
+    """ MLP using 1x1 convs that keeps spatial dims
+    """
+    def __init__(
+            self,
+            in_features,
+            hidden_features=None,
+            out_features=None,
+            act_layer=nn.ReLU,
+            norm_layer=None,
+            bias=True,
+            drop=0.,
+    ):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        bias = to_2tuple(bias)
+
+        #-------------------------------------#
+        #   使用k=1的Conv代替两个全连接层
+        #-------------------------------------#
+        self.fc1 = nn.Conv2d(in_features, hidden_features, kernel_size=1, bias=bias[0])
+        self.norm = norm_layer(hidden_features) if norm_layer else nn.Identity()
+        self.act = act_layer()
+        self.drop = nn.Dropout(drop)
+        self.fc2 = nn.Conv2d(hidden_features, out_features, kernel_size=1, bias=bias[1])
+
+    def forward(self, x):
+        x = self.fc1(x)     # [B, C, H, W] -> [B, n*C, H, W]
+        x = self.norm(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)     # [B, n*C, H, W] -> [B, C, H, W]
         return x
 
 
@@ -368,8 +426,8 @@ def window_partition(x, window_size: List[int]):
     """
     B, H, W, C = x.shape
     _assert(H % window_size[0] == 0, f'height ({H}) must be divisible by window ({window_size[0]})')
-    _assert(W % window_size[1] == 0, '')
-    x = x.view(B, H // window_size[0], window_size[0], W // window_size[1], window_size[1], C)  # [B, H, W, C] -> [B, nh, h, nw, w, C]
+    _assert(W % window_size[1] == 0, f'width ({W}) must be divisible by window ({window_size[1]})')
+    x = x.view(B, H // window_size[0], window_size[0], W // window_size[1], window_size[1], C)  # [B, H, W, C]         -> [B, nh, h, nw, w, C]
     windows = x.permute(0, 1, 3, 2, 4, 5).contiguous()                                          # [B, nh, h, nw, w, C] -> [B, nh, nw, h, w, C]
     windows = windows.view(-1, window_size[0], window_size[1], C)                               # [B, nh, nw, h, w, C] -> [B*nh*nw, h, w, C]
     return windows
@@ -415,7 +473,7 @@ def grid_partition(x, grid_size: List[int]):
     """
     B, H, W, C = x.shape
     _assert(H % grid_size[0] == 0, f'height {H} must be divisible by grid {grid_size[0]}')
-    _assert(W % grid_size[1] == 0, '')
+    _assert(W % grid_size[1] == 0, f'width {W} must be divisible by grid {grid_size[1]}')
     x = x.view(B, grid_size[0], H // grid_size[0], grid_size[1], W // grid_size[1], C)          # [B, H, W, C]         -> [B, h, nh, w, nw, C]
     windows = x.permute(0, 2, 4, 1, 3, 5).contiguous()                                          # [B, h, nh, w, nw, C] -> [B, nh, nw, h, w, C]
     windows = windows.view(-1, grid_size[0], grid_size[1], C)                                   # [B, nh, nw, h, w, C] -> [B*nh*nw, h, w, C]
@@ -1016,7 +1074,7 @@ class Backbone(nn.Module):
 
 
 def test_backbone():
-    phi = "x"
+    phi = "l"
     depth_dict          = {'n' : 0.33, 's' : 0.33, 'm' : 0.67, 'l' : 1.00, 'x' : 1.00,}
     width_dict          = {'n' : 0.25, 's' : 0.50, 'm' : 0.75, 'l' : 1.00, 'x' : 1.25,}
     deep_width_dict     = {'n' : 1.00, 's' : 1.00, 'm' : 0.75, 'l' : 0.50, 'x' : 0.50,}
@@ -1032,7 +1090,16 @@ def test_backbone():
     # l: 64 3 0.5  512
     # x: 80 3 0.5  640
 
-    model = Backbone(base_channels, base_depth, deep_mul)
+    model = Backbone(
+        base_channels,
+        base_depth,
+        deep_mul,
+        conv_type="convnext",
+        window_size=10,
+        grid_size=10,
+        sr_ratio=[8, 4, 2, 1],
+        attns=[True, True, True, True],
+    )
     x = torch.ones(1, 3, 640, 640)
 
     model.eval()
@@ -1041,7 +1108,7 @@ def test_backbone():
     for feat in feats:
         print(feat.size())
 
-    if True:
+    if False:
         onnx_path = f"backbone-{phi}.onnx"
         torch.onnx.export(
             model=model,
