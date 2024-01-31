@@ -75,6 +75,7 @@ class YoloBody(nn.Module):
         grid_size: int = 10,
         sr_ratio: list[int] = [8, 4, 2, 1], # GlobalSubSampleAttn ratio
         attns: list[bool] = [True, True, False, False], # [windows_attn, grid_attn, channel_attn, subsample_attn]
+        pretrained: bool = False,
     ):
         super(YoloBody, self).__init__()
         self.phi = phi
@@ -192,8 +193,8 @@ class YoloBody(nn.Module):
         self.cv2 = nn.ModuleList(nn.Sequential(Conv(x, c2, 3), Conv(c2, c2, 3), nn.Conv2d(c2, 4 * self.reg_max, 1)) for x in ch)
         # cls => [B, num_classes, 80/40/20, 80/40/20]
         self.cv3 = nn.ModuleList(nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, num_classes, 1)) for x in ch)
-
-        weights_init(self)
+        if not pretrained:
+            weights_init(self)
         # box [B, 4 * reg_max, 8400] => [B, 4, 8400]
         self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
 
