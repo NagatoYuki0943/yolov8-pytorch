@@ -252,10 +252,12 @@ class YoloBody(nn.Module):
         return dbox, cls, x, self.anchors.to(dbox.device), self.strides.to(dbox.device)
 
 
-if __name__ == "__main__":
-    phi = "x"
-    model = YoloBody(input_shape=[640, 640], num_classes=80, phi=phi, pretrained=False)
-    x = torch.ones(4, 3, 640, 640)
+def check():
+    device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
+
+    phi = "n"
+    model = YoloBody(input_shape=[640, 640], num_classes=80, phi=phi).to(device)
+    x = torch.ones(1, 3, 640, 640).to(device)
 
     model.eval()
     with torch.inference_mode():
@@ -292,3 +294,24 @@ if __name__ == "__main__":
         assert check, "Simplified ONNX model could not be validated"
         onnx.save(model_simple, onnx_path)
         print('finished exporting ' + onnx_path)
+
+
+def model_summary():
+    from torchsummary import summary
+
+    device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
+
+    phi = "n"
+    model = YoloBody(input_shape=[640, 640], num_classes=80, phi=phi).to(device)
+    input_size = (3, 640, 640)
+    summary(model=model, input_size=input_size, device="cuda")
+    # n:  3,157,200
+    # s: 11,166,560
+    # m: 25,902,640
+    # l: 43,691,520
+    # x: 68,229,648
+
+
+if __name__ == "__main__":
+    check()
+    # model_summary()

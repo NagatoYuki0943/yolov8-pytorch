@@ -1074,6 +1074,8 @@ class Backbone(nn.Module):
 
 
 def test_backbone():
+    device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
+
     phi = "l"
     depth_dict          = {'n' : 0.33, 's' : 0.33, 'm' : 0.67, 'l' : 1.00, 'x' : 1.00,}
     width_dict          = {'n' : 0.25, 's' : 0.50, 'm' : 0.75, 'l' : 1.00, 'x' : 1.25,}
@@ -1099,8 +1101,8 @@ def test_backbone():
         grid_size=10,
         sr_ratio=[8, 4, 2, 1],
         attns=[True, True, True, True],
-    )
-    x = torch.ones(1, 3, 640, 640)
+    ).to(device)
+    x = torch.ones(1, 3, 640, 640).to(device)
 
     model.eval()
     with torch.inference_mode():
