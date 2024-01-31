@@ -322,14 +322,14 @@ class ConvMlp(nn.Module):
     """ MLP using 1x1 convs that keeps spatial dims
     """
     def __init__(
-            self,
-            in_features,
-            hidden_features=None,
-            out_features=None,
-            act_layer=nn.ReLU,
-            norm_layer=None,
-            bias=True,
-            drop=0.,
+        self,
+        in_features,
+        hidden_features=None,
+        out_features=None,
+        act_layer=nn.ReLU,
+        norm_layer=None,
+        bias=True,
+        drop=0.,
     ):
         super().__init__()
         out_features = out_features or in_features
