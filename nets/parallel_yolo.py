@@ -340,17 +340,28 @@ def model_summary():
 
     device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
 
-    phi = "n"
-    model = YoloBody(input_shape=[640, 640], num_classes=80, phi=phi).to(device)
+    phi = "l"
+    model = YoloBody(
+        input_shape=[640, 640],
+        num_classes=80,
+        phi=phi,
+        conv_type="mobilenetv3",
+        window_size=10,
+        grid_size=10,
+        sr_ratio=[8, 4, 2, 1],
+        attns=[True, True, True, True],
+        pretrained=False,
+    ).to(device)
     input_size = (3, 640, 640)
     summary(model=model, input_size=input_size, device="cuda")
-    # n:  10,975,008
-    # s:  42,215,424
-    # m: 116,549,728
-    # l: 212,632,896
-    # x: 331,896,608
+    # attns: [True, True, False, False]   [True, True, True, True]      scale
+    # n:                     10,975,008                 13,195,840      1.20
+    # s:                     42,215,424                 51,064,384      1.21
+    # m:                    116,549,728                148,051,744      1.27
+    # l:                    212,632,896                280,828,608      1.32
+    # x:                    331,896,608                ???
 
 
 if __name__ == "__main__":
-    check()
-    # model_summary()
+    # check()
+    model_summary()
