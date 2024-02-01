@@ -66,7 +66,6 @@ class Bottleneck(nn.Module):
 #                  out
 #-----------------------------------------------#
 class C2f(nn.Module):
-    # CSPNet结构结构，大残差结构
     # c1为输入通道数，c2为输出通道数
     def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
         super().__init__()
