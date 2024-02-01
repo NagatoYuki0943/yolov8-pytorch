@@ -654,19 +654,21 @@ class ParallelAttentionCl(nn.Module):
     def __init__(
         self,
         dim: int,
-        head_dim: int = 32,
-        window_size: int = 5,
-        grid_size: int = 5,
+        head_dim: int,
+        window_size: int = 10,
+        grid_size: int = 10,
         sr_ratio: int = 1,
+        attn_drop: float = 0.,
+        proj_drop: float = 0.,
+        mlp_drop: float = 0.,
         drop_path: float = 0.,
         act_layer = nn.GELU,
+        norm_layer = nn.LayerNorm,
         layer_scale: float = 1e-5,
         attns: list[bool] = [True, True, False, False], # [windows_attn, grid_attn, channel_attn, subsample_attn]
     ):
         super().__init__()
         self.attns = attns
-
-        norm_layer = partial(nn.LayerNorm, eps=1e-6)  # NOTE this block is channels-last
 
         self.window_size = to_2tuple(window_size)
         self.grid_size = to_2tuple(grid_size)
@@ -675,11 +677,11 @@ class ParallelAttentionCl(nn.Module):
         if self.attns[0]:
             self.norm_window = norm_layer(dim)
             self.attn_window = AttentionCl(
-                dim,
+                dim=dim,
                 head_dim=head_dim,
                 bias=True,
-                attn_drop=0,
-                proj_drop=0,
+                attn_drop=attn_drop,
+                proj_drop=proj_drop,
             )
             self.ls_window = LayerScale(dim, layer_scale)
             self.drop_path_window = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -689,11 +691,11 @@ class ParallelAttentionCl(nn.Module):
         if self.attns[1]:
             self.norm_grid = norm_layer(dim)
             self.attn_grid = AttentionCl(
-                dim,
+                dim=dim,
                 head_dim=head_dim,
                 bias=True,
-                attn_drop=0,
-                proj_drop=0,
+                attn_drop=attn_drop,
+                proj_drop=proj_drop,
             )
             self.ls_grid = LayerScale(dim, layer_scale)
             self.drop_path_grid = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -703,11 +705,11 @@ class ParallelAttentionCl(nn.Module):
         if self.attns[2]:
             self.norm_channel = norm_layer(dim)
             self.attn_channel = ChannelAttention(
-                dim,
+                dim=dim,
                 head_dim=head_dim,
                 bias=True,
-                attn_drop=0,
-                proj_drop=0,
+                attn_drop=attn_drop,
+                proj_drop=proj_drop,
             )
             self.ls_channel = LayerScale(dim, layer_scale)
             self.drop_path_channel = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -717,11 +719,11 @@ class ParallelAttentionCl(nn.Module):
         if self.attns[3]:
             self.norm_subsample = norm_layer(dim)
             self.attn_subsample = GlobalSubSampleAttn(
-                dim,
+                dim=dim,
                 head_dim=head_dim,
                 bias=True,
-                attn_drop=0,
-                proj_drop=0,
+                attn_drop=attn_drop,
+                proj_drop=proj_drop,
                 sr_ratio=sr_ratio,
             )
             self.ls_subsample = LayerScale(dim, layer_scale)
@@ -734,7 +736,8 @@ class ParallelAttentionCl(nn.Module):
             in_features=dim,
             hidden_features=int(dim * 4),
             act_layer=act_layer,
-            drop=0
+            norm_layer=norm_layer,
+            drop=mlp_drop,
         )
         self.ls_mlp = LayerScale(dim, layer_scale)
         self.drop_path_mlp = DropPath(drop_path) if drop_path > 0. else nn.Identity()
@@ -819,11 +822,15 @@ class ParallelBlock(nn.Module):
         dim_out: int = 512,
         head_dim: int = 32,
         stride: int = 1,
-        window_size: int = 5,
-        grid_size: int = 5,
-        sr_ratio: int = 2,
+        window_size: int = 10,
+        grid_size: int = 10,
+        sr_ratio: int = 1,
+        attn_drop: float = 0.,
+        proj_drop: float = 0.,
+        mlp_drop: float = 0.,
         drop_path: float = 0.,
         act_layer = nn.GELU,
+        norm_layer = nn.LayerNorm,
         layer_scale: float = 1e-5,
         attns: list[bool] = [True, True, False, False], # [windows_attn, grid_attn, channel_attn, subsample_attn]
     ):
@@ -840,8 +847,12 @@ class ParallelBlock(nn.Module):
             window_size=window_size,
             grid_size=grid_size,
             sr_ratio=sr_ratio,
+            attn_drop=attn_drop,
+            proj_drop=proj_drop,
+            mlp_drop=mlp_drop,
             drop_path=drop_path,
             act_layer=act_layer,
+            norm_layer=norm_layer,
             layer_scale=layer_scale,
             attns=attns,
         )
@@ -869,11 +880,15 @@ class ParallelStage(nn.Module):
         dim_out: int = 512,
         head_dim: int = 32,
         stride: int = 1,
-        window_size: int = 5,
-        grid_size: int = 5,
+        window_size: int = 10,
+        grid_size: int = 10,
         sr_ratio: int = 1,
+        attn_drop: float = 0.,
+        proj_drop: float = 0.,
+        mlp_drop: float = 0.,
         drop_path: float = 0.,
         act_layer = nn.GELU,
+        norm_layer = nn.LayerNorm,
         layer_scale: float = 1e-5,
         attns: list[bool] = [True, True, False, False], # [windows_attn, grid_attn, channel_attn, subsample_attn]
     ):
@@ -890,8 +905,12 @@ class ParallelStage(nn.Module):
                     window_size=window_size,
                     grid_size=grid_size,
                     sr_ratio=sr_ratio,
+                    attn_drop=attn_drop,
+                    proj_drop=proj_drop,
+                    mlp_drop=mlp_drop,
                     drop_path=drop_path,
                     act_layer=act_layer,
+                    norm_layer=norm_layer,
                     layer_scale=layer_scale,
                     attns=attns,
                 ))
@@ -954,6 +973,10 @@ class Backbone(nn.Module):
         conv_type: str = "mobilenetv3", # mobilenetv3, convnext
         window_size: int = 10,
         grid_size: int = 10,
+        attn_drop: float = 0.,
+        proj_drop: float = 0.,
+        mlp_drop: float = 0.,
+        drop_path: float = 0.,
         sr_ratio: list[int] = [8, 4, 2, 1], # GlobalSubSampleAttn ratio
         attns: list[bool] = [True, True, False, False], # [windows_attn, grid_attn, channel_attn, subsample_attn]
     ):
@@ -964,23 +987,30 @@ class Backbone(nn.Module):
         # 3, 640, 640 => 64, 320, 320
         self.stem = Conv(3, base_channels, 3, 2)
 
-        # 64, 320, 320 => 128, 160, 160 => 128, 160, 160
-
-        # self.dark2 = nn.Sequential(
-        #     Conv(base_channels, base_channels * 2, 3, 2),
-        #     C2f(base_channels * 2, base_channels * 2, base_depth, True),
-        # )
-        self.dark2 = ParallelStage(
-            depth=base_depth,
+        p_stage = partial(
+            ParallelStage,
             conv_type=conv_type,
-            dim_in=base_channels,
-            dim_out=base_channels * 2,
             head_dim=base_channels,
             stride=2,
             window_size=window_size,
             grid_size=grid_size,
-            sr_ratio=sr_ratio[0],
+            attn_drop=attn_drop,
+            proj_drop=proj_drop,
+            mlp_drop=mlp_drop,
+            drop_path=drop_path,
             attns=attns,
+        )
+
+        # 64, 320, 320 => 128, 160, 160 => 128, 160, 160
+        # self.dark2 = nn.Sequential(
+        #     Conv(base_channels, base_channels * 2, 3, 2),
+        #     C2f(base_channels * 2, base_channels * 2, base_depth, True),
+        # )
+        self.dark2 = p_stage(
+            depth=base_depth,
+            dim_in=base_channels,
+            dim_out=base_channels * 2,
+            sr_ratio=sr_ratio[0],
         )
 
         # 128, 160, 160 => 256, 80, 80 => 256, 80, 80
@@ -988,17 +1018,11 @@ class Backbone(nn.Module):
         #     Conv(base_channels * 2, base_channels * 4, 3, 2),
         #     C2f(base_channels * 4, base_channels * 4, base_depth * 2, True),
         # )
-        self.dark3 = ParallelStage(
+        self.dark3 = p_stage(
             depth=base_depth * 2,
-            conv_type=conv_type,
             dim_in=base_channels * 2,
             dim_out=base_channels * 4,
-            head_dim=base_channels,
-            stride=2,
-            window_size=window_size,
-            grid_size=grid_size,
             sr_ratio=sr_ratio[1],
-            attns=attns,
         )
 
         # 256, 80, 80 => 512, 40, 40 => 512, 40, 40
@@ -1006,17 +1030,11 @@ class Backbone(nn.Module):
         #     Conv(base_channels * 4, base_channels * 8, 3, 2),
         #     C2f(base_channels * 8, base_channels * 8, base_depth * 2, True),
         # )
-        self.dark4 = ParallelStage(
+        self.dark4 = p_stage(
             depth=base_depth * 2,
-            conv_type=conv_type,
             dim_in=base_channels * 4,
             dim_out=base_channels * 8,
-            head_dim=base_channels,
-            stride=2,
-            window_size=window_size,
-            grid_size=grid_size,
             sr_ratio=sr_ratio[2],
-            attns=attns,
         )
 
         # 512, 40, 40 => 1024 * deep_mul, 20, 20 => 1024 * deep_mul, 20, 20
@@ -1026,17 +1044,11 @@ class Backbone(nn.Module):
         #     SPPF(int(base_channels * 16 * deep_mul), int(base_channels * 16 * deep_mul), k=5)
         # )
         self.dark5 = nn.Sequential(
-            ParallelStage(
+            p_stage(
                 depth=base_depth,
-                conv_type=conv_type,
                 dim_in=base_channels * 8,
                 dim_out=int(base_channels * 16 * deep_mul),
-                head_dim=base_channels,
-                stride=2,
-                window_size=window_size,
-                grid_size=grid_size,
                 sr_ratio=sr_ratio[3],
-                attns=attns,
             ),
             Permute([0, 2, 3, 1]),  # [B, C, H, W] -> [B, H, W, C]
             AttentionCl(
@@ -1076,7 +1088,7 @@ class Backbone(nn.Module):
 def test_backbone():
     device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
 
-    phi = "l"
+    phi = "n"
     depth_dict          = {'n' : 0.33, 's' : 0.33, 'm' : 0.67, 'l' : 1.00, 'x' : 1.00,}
     width_dict          = {'n' : 0.25, 's' : 0.50, 'm' : 0.75, 'l' : 1.00, 'x' : 1.25,}
     deep_width_dict     = {'n' : 1.00, 's' : 1.00, 'm' : 0.75, 'l' : 0.50, 'x' : 0.50,}

@@ -1,3 +1,4 @@
+from functools import partial
 import numpy as np
 import torch
 import torch.nn as nn
@@ -73,6 +74,10 @@ class YoloBody(nn.Module):
         conv_type: str = "mobilenetv3", # mobilenetv3  convnext
         window_size: int = 10,
         grid_size: int = 10,
+        attn_drop: float = 0.1,
+        proj_drop: float = 0.1,
+        mlp_drop: float = 0.1,
+        drop_path: float = 0.,
         sr_ratio: list[int] = [8, 4, 2, 1], # GlobalSubSampleAttn ratio
         attns: list[bool] = [True, True, False, False], # [windows_attn, grid_attn, channel_attn, subsample_attn]
         pretrained: bool = False,
@@ -105,6 +110,10 @@ class YoloBody(nn.Module):
             conv_type=conv_type,
             window_size=window_size,
             grid_size=grid_size,
+            attn_drop=attn_drop,
+            proj_drop=proj_drop,
+            mlp_drop=mlp_drop,
+            drop_path=drop_path,
             sr_ratio=sr_ratio,
             attns=attns,
         )
@@ -112,70 +121,59 @@ class YoloBody(nn.Module):
         #------------------------加强特征提取网络------------------------#
         self.upsample   = nn.Upsample(scale_factor=2, mode="nearest")
 
-        # [B, 1024 * deep_mul] + [B, 512, 40, 40] => [B, 512, 40, 40]
-        # self.conv3_for_upsample1 = C2f(int(base_channels * 16 * deep_mul) + base_channels * 8, base_channels * 8, base_depth, shortcut=False)
-        self.conv3_for_upsample1 = ParallelStage(
+        p_stage = partial(
+            ParallelStage,
             depth=base_depth,
             conv_type=conv_type,
-            dim_in=int(base_channels * 16 * deep_mul) + base_channels * 8,
-            dim_out=base_channels * 8,
             head_dim=base_channels,
             stride=1,
             window_size=window_size,
             grid_size=grid_size,
-            sr_ratio=sr_ratio[2],
+            attn_drop=attn_drop,
+            proj_drop=proj_drop,
+            mlp_drop=mlp_drop,
+            drop_path=drop_path,
             attns=attns,
         )
+
+        # [B, 1024 * deep_mul] + [B, 512, 40, 40] => [B, 512, 40, 40]
+        # self.conv3_for_upsample1 = C2f(int(base_channels * 16 * deep_mul) + base_channels * 8, base_channels * 8, base_depth, shortcut=False)
+        self.conv3_for_upsample1 = p_stage(
+            dim_in=int(base_channels * 16 * deep_mul) + base_channels * 8,
+            dim_out=base_channels * 8,
+            sr_ratio=sr_ratio[2],
+        )
+
         # [B, 768, 80, 80] => [B, 256, 80, 80]
         # self.conv3_for_upsample2 = C2f(base_channels * 8 + base_channels * 4, base_channels * 4, base_depth, shortcut=False)
-        self.conv3_for_upsample2 = ParallelStage(
-            depth=base_depth,
-            conv_type=conv_type,
+        self.conv3_for_upsample2 = p_stage(
             dim_in=base_channels * 8 + base_channels * 4,
             dim_out=base_channels * 4,
-            head_dim=base_channels,
-            stride=1,
-            window_size=window_size,
-            grid_size=grid_size,
             sr_ratio=sr_ratio[1],
-            attns=attns,
         )
 
         # [B, 256, 80, 80] => [B, 256, 40, 40]
         self.down_sample1          = Conv(base_channels * 4, base_channels * 4, 3, 2)
         # [B, 512 + 256, 40, 40] => [B, 512, 40, 40]
         # self.conv3_for_downsample1 = C2f(base_channels * 8 + base_channels * 4, base_channels * 8, base_depth, shortcut=False)
-        self.conv3_for_downsample1 = ParallelStage(
-            depth=base_depth,
-            conv_type=conv_type,
+        self.conv3_for_downsample1 = p_stage(
             dim_in=base_channels * 8 + base_channels * 4,
             dim_out=base_channels * 8,
-            head_dim=base_channels,
-            stride=1,
-            window_size=window_size,
-            grid_size=grid_size,
             sr_ratio=sr_ratio[2],
-            attns=attns,
         )
 
         # [B, 512, 40, 40] => [B, 512, 20, 20]
         self.down_sample2          = Conv(base_channels * 8, base_channels * 8, 3, 2)
         # [B, 1024 * deep_mul] + [B, 512, 20, 20] =>  [B, 1024 * deep_mul, 20, 20]
         # self.conv3_for_downsample2 = C2f(int(base_channels * 16 * deep_mul) + base_channels * 8, int(base_channels * 16 * deep_mul), base_depth, shortcut=False)
-        self.conv3_for_downsample2 = ParallelStage(
-            depth=base_depth,
-            conv_type=conv_type,
+        self.conv3_for_downsample2 = p_stage(
             dim_in=int(base_channels * 16 * deep_mul) + base_channels * 8,
             dim_out=int(base_channels * 16 * deep_mul),
-            head_dim=base_channels,
-            stride=1,
-            window_size=window_size,
-            grid_size=grid_size,
             sr_ratio=sr_ratio[3],
-            attns=attns,
         )
         #------------------------加强特征提取网络------------------------#
 
+        #------------------------检测头------------------------#
         ch              = [base_channels * 4, base_channels * 8, int(base_channels * 16 * deep_mul)]
         self.shape      = None
         self.nl         = len(ch)
@@ -197,6 +195,7 @@ class YoloBody(nn.Module):
             weights_init(self)
         # box [B, 4 * reg_max, 8400] => [B, 4, 8400]
         self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
+        #------------------------检测头------------------------#
 
     def fuse(self):
         print('Fusing layers... ')
@@ -251,6 +250,7 @@ class YoloBody(nn.Module):
         # P5_out [B, 1024 * deep_mul, 20, 20]
         shape = P3_out.shape  # BCHW
 
+        #------------------------检测头------------------------#
         # 将每层的box和cls输出拼接起来
         # P3_out [B, 256, 80, 80]             => [B, 4 * reg_max + num_classes, 80, 80]
         # P4_out [B, 512, 40, 40]             => [B, 4 * reg_max + num_classes, 40, 40]
@@ -280,6 +280,7 @@ class YoloBody(nn.Module):
         # 对box做DFL处理,获取位置的4个回归值
         # [B, 4 * reg_max, 8400] => [B, 4, 8400]
         dbox            = self.dfl(box)
+        #------------------------检测头------------------------#
 
         #-------------------------------------------------------------------------------------------#
         #   dbox:    [B, 4, 8400]           box detect
@@ -340,7 +341,7 @@ def model_summary():
 
     device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
 
-    phi = "l"
+    phi = "n"
     model = YoloBody(
         input_shape=[640, 640],
         num_classes=80,
@@ -349,17 +350,17 @@ def model_summary():
         window_size=10,
         grid_size=10,
         sr_ratio=[8, 4, 2, 1],
-        attns=[True, True, True, True],
+        attns=[True, True, False, False],
         pretrained=False,
     ).to(device)
     input_size = (3, 640, 640)
     summary(model=model, input_size=input_size, device="cuda")
     # attns: [True, True, False, False]   [True, True, True, True]      scale
-    # n:                     10,975,008                 13,195,840      1.20
-    # s:                     42,215,424                 51,064,384      1.21
-    # m:                    116,549,728                148,051,744      1.27
-    # l:                    212,632,896                280,828,608      1.32
-    # x:                    331,896,608                ???
+    # n:                     10,984,992                 13,205,824      1.20
+    # s:                     42,235,392                 51,084,352      1.21
+    # m:                    116,603,488                148,105,504      1.27
+    # l:                            ???
+    # x:                            ???
 
 
 if __name__ == "__main__":
