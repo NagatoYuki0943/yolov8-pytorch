@@ -339,7 +339,7 @@ def check():
 def model_summary():
     from torchsummary import summary
 
-    device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     phi = "n"
     model = YoloBody(
@@ -350,17 +350,17 @@ def model_summary():
         window_size=10,
         grid_size=10,
         sr_ratio=[8, 4, 2, 1],
-        attns=[True, True, False, False],
+        attns=[True, True, True, True],
         pretrained=False,
     ).to(device)
     input_size = (3, 640, 640)
-    summary(model=model, input_size=input_size, device="cuda")
+    summary(model=model, input_size=input_size, device=device)
     # attns: [True, True, False, False]   [True, True, True, True]      scale
     # n:                     10,984,992                 13,205,824      1.20
     # s:                     42,235,392                 51,084,352      1.21
     # m:                    116,603,488                148,105,504      1.27
-    # l:                            ???
-    # x:                            ???
+    # l:                    212,728,128                280,923,840      1.33
+    # x:                    332,015,648                ???
 
 
 if __name__ == "__main__":
