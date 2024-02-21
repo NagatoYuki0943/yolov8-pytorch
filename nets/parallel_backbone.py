@@ -1000,6 +1000,7 @@ class Backbone(nn.Module):
         drop_path: float = 0.,
         sr_ratio: list[int] = [8, 4, 2, 1], # GlobalSubSampleAttn ratio
         attns: list[bool] = [True, True, False, False], # [windows_attn, grid_attn, channel_attn, subsample_attn]
+        last_attn: bool = False,
     ):
         super().__init__()
         #-----------------------------------------------#
@@ -1064,20 +1065,24 @@ class Backbone(nn.Module):
         #     C2f(int(base_channels * 16 * deep_mul), int(base_channels * 16 * deep_mul), base_depth, True),
         #     SPPF(int(base_channels * 16 * deep_mul), int(base_channels * 16 * deep_mul), k=5)
         # )
-        self.dark5 = nn.Sequential(
+        dark5 = [
             p_stage(
                 depth=base_depth,
                 dim_in=base_channels * 8,
                 dim_out=int(base_channels * 16 * deep_mul),
                 sr_ratio=sr_ratio[3],
-            ),
-            Permute([0, 2, 3, 1]),  # [B, C, H, W] -> [B, H, W, C]
-            AttentionCl(
-                dim=int(base_channels * 16 * deep_mul),
-                head_dim=base_channels,
-            ),
-            Permute([0, 3, 1, 2]),  # [B, H, W, C] -> [B, C, H, W]
-        )
+            )
+        ]
+        if last_attn:
+            dark5.extend([
+                Permute([0, 2, 3, 1]),  # [B, C, H, W] -> [B, H, W, C]
+                AttentionCl(
+                    dim=int(base_channels * 16 * deep_mul),
+                    head_dim=base_channels,
+                ),
+                Permute([0, 3, 1, 2]),  # [B, H, W, C] -> [B, C, H, W]
+            ])
+        self.dark5 = nn.Sequential(*dark5)
 
     def forward(self, x):
         x = self.stem(x)

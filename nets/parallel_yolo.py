@@ -80,6 +80,7 @@ class YoloBody(nn.Module):
         drop_path: float = 0.,
         sr_ratio: list[int] = [8, 4, 2, 1], # GlobalSubSampleAttn ratio
         attns: list[bool] = [True, True, False, False], # [windows_attn, grid_attn, channel_attn, subsample_attn]
+        last_attn: bool = False,
         pretrained: bool = False,
     ):
         super(YoloBody, self).__init__()
@@ -116,6 +117,7 @@ class YoloBody(nn.Module):
             drop_path=drop_path,
             sr_ratio=sr_ratio,
             attns=attns,
+            last_attn=last_attn,
         )
 
         #------------------------加强特征提取网络------------------------#
