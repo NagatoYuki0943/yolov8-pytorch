@@ -646,8 +646,6 @@ class GlobalSubSampleAttn(nn.Module):
 #   │           │            │            │             │
 #   └───────────┴─────────── + ───────────┴─────────────┘
 #                            │
-#                           mlp
-#                            │
 #                           out
 #-----------------------------------------------------------------#
 class ParallelAttentionCl(nn.Module):
