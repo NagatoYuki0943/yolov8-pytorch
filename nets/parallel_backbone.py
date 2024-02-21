@@ -793,6 +793,21 @@ def test_parallel_attentionCl():
         )
 
 
+#----------------------------------------#
+#             in
+#              │
+#            conv(include residual)
+#              │
+#            attns(include residual)
+#              │
+#       ┌──────┤
+#       │      │
+#       │     mlp
+#       │      │
+#       └───── +
+#              │
+#             out
+#----------------------------------------#
 class ParallelBlock(nn.Module):
     def __init__(
         self,
@@ -863,7 +878,7 @@ class ParallelBlock(nn.Module):
         #--------- attn ----------#
 
         #---------- mlp ----------#
-        x = self.drop_path_mlp(self.ls_mlp(self.mlp(self.norm_mlp(x))))
+        x = x + self.drop_path_mlp(self.ls_mlp(self.mlp(self.norm_mlp(x))))
         #---------- mlp ----------#
 
         x = x.permute(0, 3, 1, 2)   # [B, H, W, C] -> [B, C, H, W]
