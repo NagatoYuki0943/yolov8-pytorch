@@ -260,7 +260,7 @@ class ConvNeXtBlock(nn.Module):
         self.block = nn.Sequential(
             # DWConv
             nn.Conv2d(dim_in, dim_out, kernel_size=7, stride=stride, padding=3, groups=groups, bias=True),  # [B, C, H, W] -> [B, C, H, W]
-            norm_layer(dim_out),        # LayerNorm 和 Linear 默认在最后通道计算
+            norm_layer(dim_out),
             nn.Conv2d(dim_out, 4 * dim_out, kernel_size=1, bias=True),                                      # [B, C, H, W] -> [B, 4*C, H, W]
             activation_layer(),
             nn.Conv2d(4 * dim_out, dim_out, kernel_size=1, bias=True),                                      # [B, 4*C, H, W] -> [B, C, H, W]
