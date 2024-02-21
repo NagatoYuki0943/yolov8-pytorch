@@ -660,9 +660,7 @@ class ParallelAttentionCl(nn.Module):
         sr_ratio: int = 1,
         attn_drop: float = 0.,
         proj_drop: float = 0.,
-        mlp_drop: float = 0.,
         drop_path: float = 0.,
-        act_layer = nn.GELU,
         norm_layer = nn.LayerNorm,
         layer_scale: float = 1e-5,
         attns: list[bool] = [True, True, False, False], # [windows_attn, grid_attn, channel_attn, subsample_attn]
@@ -730,23 +728,9 @@ class ParallelAttentionCl(nn.Module):
             self.drop_path_subsample = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         #---------- subsample attn ----------#
 
-        #---------- mlp ----------#
-        self.norm_mlp = norm_layer(dim)
-        self.mlp = Mlp(
-            in_features=dim,
-            hidden_features=int(dim * 4),
-            act_layer=act_layer,
-            norm_layer=norm_layer,
-            drop=mlp_drop,
-        )
-        self.ls_mlp = LayerScale(dim, layer_scale)
-        self.drop_path_mlp = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        #---------- mlp ----------#
-
     def forward(self, x):
-        B, C, H, W = x.shape
+        B, H, W, C = x.shape
         img_size = [H, W]
-        x = x.permute(0, 2, 3, 1)   # [B, C, H, W] -> [B, H, W, C]
         xs = [x]
 
         #---------- windows attn ----------#
@@ -791,11 +775,6 @@ class ParallelAttentionCl(nn.Module):
 
         x = sum(xs)
 
-        #---------- mlp ----------#
-        x = self.drop_path_mlp(self.ls_mlp(self.mlp(self.norm_mlp(x))))
-        #---------- mlp ----------#
-
-        x = x.permute(0, 3, 1, 2)   # [B, H, W, C] -> [B, C, H, W]
         return x
 
 
@@ -835,12 +814,15 @@ class ParallelBlock(nn.Module):
         attns: list[bool] = [True, True, False, False], # [windows_attn, grid_attn, channel_attn, subsample_attn]
     ):
         super().__init__()
+        #--------- conv ----------#
         assert conv_type in ["mobilenetv3", "convnext"]
         if conv_type == "mobilenetv3":
             self.conv = InvertedResidual(dim_in=dim_in, dim_out=dim_out, kernel=3, stride=stride, use_se=True, activation_layer=act_layer)
         elif conv_type == "convnext":
             self.conv = ConvNeXtBlock(dim_in=dim_in, dim_out=dim_out, stride=stride, layer_scale=layer_scale, activation_layer=act_layer)
+        #--------- conv ----------#
 
+        #--------- attn ----------#
         self.attn = ParallelAttentionCl(
             dim_out,
             head_dim=head_dim,
@@ -849,17 +831,43 @@ class ParallelBlock(nn.Module):
             sr_ratio=sr_ratio,
             attn_drop=attn_drop,
             proj_drop=proj_drop,
-            mlp_drop=mlp_drop,
             drop_path=drop_path,
-            act_layer=act_layer,
             norm_layer=norm_layer,
             layer_scale=layer_scale,
             attns=attns,
         )
+        #--------- attn ----------#
+
+        #---------- mlp ----------#
+        self.norm_mlp = norm_layer(dim_out)
+        self.mlp = Mlp(
+            in_features=dim_out,
+            hidden_features=int(dim_out * 4),
+            act_layer=act_layer,
+            norm_layer=norm_layer,
+            drop=mlp_drop,
+        )
+        self.ls_mlp = LayerScale(dim_out, layer_scale)
+        self.drop_path_mlp = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        #---------- mlp ----------#
 
     def forward(self, x):
+        #--------- conv ----------#
         x = self.conv(x)
+        #--------- conv ----------#
+
+        x = x.permute(0, 2, 3, 1)   # [B, C, H, W] -> [B, H, W, C]
+
+        #--------- attn ----------#
         x = self.attn(x)
+        #--------- attn ----------#
+
+        #---------- mlp ----------#
+        x = self.drop_path_mlp(self.ls_mlp(self.mlp(self.norm_mlp(x))))
+        #---------- mlp ----------#
+
+        x = x.permute(0, 3, 1, 2)   # [B, H, W, C] -> [B, C, H, W]
+
         return x
 
 
