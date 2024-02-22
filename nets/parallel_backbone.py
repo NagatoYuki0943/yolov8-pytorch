@@ -518,7 +518,7 @@ class ChannelAttention(nn.Module):
         assert dim % head_dim == 0, f"dim {dim} should be divided by head_dim {head_dim}."
         self.head_dim = head_dim
         self.num_heads = dim // head_dim
-        self.scale = head_dim ** -0.5
+        self.scale = head_dim ** -0.5   # 注意这里的scale因子还是使用的 dim 的开方的倒数,而不使用图片的宽高,因为 dim 和图片大小==宽高无关
 
         self.qkv = nn.Linear(dim, dim * 3, bias=bias)
         self.attn_drop = nn.Dropout(attn_drop)
@@ -529,6 +529,11 @@ class ChannelAttention(nn.Module):
         B, H, W, C = x.shape
 
         qkv = self.qkv(x)                                               # [B, H, W, C] -> [B, H, W, 3*C]
+        #------------------------------------------------------------------------------#
+        #   https://zhuanlan.zhihu.com/p/500202422
+        #   多头还是在 dim 上做的,原始 Attention 是在 dim 上分多头,在空间维度上做自注意力
+        #   而这里还是在 dim 上分多头(分组),在 dim 上做的自注意力,在空间维度上没有多头,是单头的
+        #------------------------------------------------------------------------------#
         qkv = qkv.reshape(B, -1, 3, self.num_heads, self.head_dim)      # [B, H, W, 3*C] -> [B, H*W, 3, h, c]   C = h * c
         qkv = qkv.permute(2, 0, 3, 1, 4)                                # [B, H*W, 3, h, c] -> [3, B, h, H*W, c]
         q, k, v = qkv.unbind(0)                                         # [3, B, h, H*W, c] -> 3 * [B, h, H*W, c]
