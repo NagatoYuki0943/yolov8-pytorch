@@ -76,6 +76,7 @@ class YoloBody(nn.Module):
         grid_size: int = 10,
         attn_drop: float = 0.1,
         proj_drop: float = 0.1,
+        mlp_type: str = "MLP",  # MLP, GluMlp, SwiGLU
         mlp_drop: float = 0.1,
         drop_path: float = 0.,
         sr_ratio: list[int] = [8, 4, 2, 1], # GlobalSubSampleAttn ratio
@@ -113,6 +114,7 @@ class YoloBody(nn.Module):
             grid_size=grid_size,
             attn_drop=attn_drop,
             proj_drop=proj_drop,
+            mlp_type=mlp_type,
             mlp_drop=mlp_drop,
             drop_path=drop_path,
             sr_ratio=sr_ratio,
@@ -133,6 +135,7 @@ class YoloBody(nn.Module):
             grid_size=grid_size,
             attn_drop=attn_drop,
             proj_drop=proj_drop,
+            mlp_type=mlp_type,
             mlp_drop=mlp_drop,
             drop_path=drop_path,
             attns=attns,
@@ -351,6 +354,7 @@ def model_summary():
         conv_type="mobilenetv3",
         window_size=10,
         grid_size=10,
+        mlp_type="GluMlp", # MLP, GluMlp, SwiGLU
         sr_ratio=[8, 4, 2, 1],
         attns=[True, True, True, True],
         pretrained=False,

@@ -314,6 +314,132 @@ class Mlp(nn.Module):
         return x
 
 
+#-----------------------#
+#          in
+#           │
+#           │
+#          fc1
+#           │
+#     ┌── split ──┐
+#    act          │
+#     └──── * ────┘
+#           │
+#         drop1
+#           │
+#         norm
+#           │
+#          fc2
+#           │
+#         drop2
+#           │
+#           │
+#          out
+#-----------------------#
+class GluMlp(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        hidden_features: int = None,
+        out_features: int = None,
+        act_layer = nn.Sigmoid,
+        norm_layer = None,
+        bias: bool = True,
+        drop: float = 0.,
+    ):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        assert hidden_features % 2 == 0
+        self.chunk_dim = -1
+        bias = to_2tuple(bias)
+        drop_probs = to_2tuple(drop)
+
+        self.fc1 = nn.Linear(in_features, hidden_features, bias=bias[0])
+        self.act = act_layer()
+        self.drop1 = nn.Dropout(drop_probs[0])
+        self.norm = norm_layer(hidden_features // 2) if norm_layer is not None else nn.Identity()
+        self.fc2 = nn.Linear(hidden_features // 2, out_features, bias=bias[1])
+        self.drop2 = nn.Dropout(drop_probs[1])
+
+    def forward(self, x):
+        x = self.fc1(x)                         # [B, N, C] -> [B, N, n*C]
+        x1, x2 = x.chunk(2, dim=self.chunk_dim) # [B, N, n*C] -> 2 * [B, N, n*C/2]
+        x = self.act(x1) * x2                   # [B, N, n*C/2] * act([B, N, n*C/2]) = [B, N, n*C/2]
+        x = self.drop1(x)
+        x = self.norm(x)
+        x = self.fc2(x)                         # [B, N, n*C/2] -> [B, N, C]
+        x = self.drop2(x)
+        return x
+
+
+#-----------------------#
+#          in
+#           │
+#           │
+#     ┌─────┴─────┐
+#     │           │
+#   fc1_g         │
+#     │         fc1_x
+#    act          │
+#     │           │
+#     └──── * ────┘
+#           │
+#         drop1
+#           │
+#         norm
+#           │
+#          fc2
+#           │
+#         drop2
+#           │
+#           │
+#          out
+#-----------------------#
+class SwiGLU(nn.Module):
+    """ SwiGLU
+    NOTE: GluMLP above can implement SwiGLU, but this impl has split fc1 and
+    better matches some other common impl which makes mapping checkpoints simpler.
+    """
+    def __init__(
+        self,
+        in_features: int,
+        hidden_features: int = None,
+        out_features: int = None,
+        act_layer = nn.SiLU,
+        norm_layer = None,
+        bias: bool = True,
+        drop: float = 0.,
+    ):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+        bias = to_2tuple(bias)
+        drop_probs = to_2tuple(drop)
+
+        self.fc1_g = nn.Linear(in_features, hidden_features, bias=bias[0])
+        self.fc1_x = nn.Linear(in_features, hidden_features, bias=bias[0])
+        self.act = act_layer()
+        self.drop1 = nn.Dropout(drop_probs[0])
+        self.norm = norm_layer(hidden_features) if norm_layer is not None else nn.Identity()
+        self.fc2 = nn.Linear(hidden_features, out_features, bias=bias[1])
+        self.drop2 = nn.Dropout(drop_probs[1])
+
+    def init_weights(self):
+        # override init of fc1 w/ gate portion set to weight near zero, bias=1
+        nn.init.ones_(self.fc1_g.bias)
+        nn.init.normal_(self.fc1_g.weight, std=1e-6)
+
+    def forward(self, x):
+        x_gate = self.fc1_g(x)      # [B, N, C] -> [B, N, n*C]
+        x = self.fc1_x(x)           # [B, N, C] -> [B, N, n*C]
+        x = self.act(x_gate) * x    # act([B, N, n*C]) * [B, N, n*C] = [B, N, n*C]
+        x = self.drop1(x)
+        x = self.norm(x)
+        x = self.fc2(x)             # [B, N, n*C] -> [B, N, C]
+        x = self.drop2(x)
+        return x
+
+
 #-------------------------------------#
 #   1x1Conv代替全连接层
 #   宽高不为1,不是注意力
@@ -824,6 +950,7 @@ class ParallelBlock(nn.Module):
         sr_ratio: int = 1,
         attn_drop: float = 0.,
         proj_drop: float = 0.,
+        mlp_type: str = "MLP",  # MLP, GluMlp, SwiGLU
         mlp_drop: float = 0.,
         drop_path: float = 0.,
         act_layer = nn.GELU,
@@ -832,8 +959,10 @@ class ParallelBlock(nn.Module):
         attns: list[bool] = [True, True, False, False], # [windows_attn, grid_attn, channel_attn, subsample_attn]
     ):
         super().__init__()
-        #--------- conv ----------#
         assert conv_type in ["mobilenetv3", "convnext"]
+        assert mlp_type in ["MLP", "GluMlp", "SwiGLU"]
+
+        #--------- conv ----------#
         if conv_type == "mobilenetv3":
             self.conv = InvertedResidual(dim_in=dim_in, dim_out=dim_out, kernel=3, stride=stride, use_se=True, activation_layer=act_layer)
         elif conv_type == "convnext":
@@ -858,7 +987,8 @@ class ParallelBlock(nn.Module):
 
         #---------- mlp ----------#
         self.norm_mlp = norm_layer(dim_out)
-        self.mlp = Mlp(
+        mlp = {"MLP": Mlp, "GluMlp": GluMlp, "SwiGLU": SwiGLU}[mlp_type]
+        self.mlp = mlp(
             in_features=dim_out,
             hidden_features=int(dim_out * 4),
             act_layer=act_layer,
@@ -911,6 +1041,7 @@ class ParallelStage(nn.Module):
         sr_ratio: int = 1,
         attn_drop: float = 0.,
         proj_drop: float = 0.,
+        mlp_type: str = "MLP",  # MLP, GluMlp, SwiGLU
         mlp_drop: float = 0.,
         drop_path: float = 0.,
         act_layer = nn.GELU,
@@ -933,6 +1064,7 @@ class ParallelStage(nn.Module):
                     sr_ratio=sr_ratio,
                     attn_drop=attn_drop,
                     proj_drop=proj_drop,
+                    mlp_type=mlp_type,
                     mlp_drop=mlp_drop,
                     drop_path=drop_path,
                     act_layer=act_layer,
@@ -1001,6 +1133,7 @@ class Backbone(nn.Module):
         grid_size: int = 10,
         attn_drop: float = 0.,
         proj_drop: float = 0.,
+        mlp_type: str = "MLP",  # MLP, GluMlp, SwiGLU
         mlp_drop: float = 0.,
         drop_path: float = 0.,
         sr_ratio: list[int] = [8, 4, 2, 1], # GlobalSubSampleAttn ratio
@@ -1023,6 +1156,7 @@ class Backbone(nn.Module):
             grid_size=grid_size,
             attn_drop=attn_drop,
             proj_drop=proj_drop,
+            mlp_type=mlp_type,
             mlp_drop=mlp_drop,
             drop_path=drop_path,
             attns=attns,
@@ -1142,6 +1276,7 @@ def test_backbone():
         conv_type="convnext",
         window_size=10,
         grid_size=10,
+        mlp_type="GluMlp", # MLP, GluMlp, SwiGLU
         sr_ratio=[8, 4, 2, 1],
         attns=[True, True, True, True],
     ).to(device)
