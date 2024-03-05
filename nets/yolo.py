@@ -1,9 +1,10 @@
 import numpy as np
 import torch
 import torch.nn as nn
-import sys
-sys.path.append("../")
 
+if __name__ == "__main__":
+    import sys
+    sys.path.append("../")
 from nets.backbone import Backbone, C2f, Conv
 from nets.yolo_training import weights_init
 from nets.swin import Swin

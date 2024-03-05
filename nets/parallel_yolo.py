@@ -2,9 +2,10 @@ from functools import partial
 import numpy as np
 import torch
 import torch.nn as nn
-import sys
-sys.path.append("../")
 
+if __name__ == "__main__":
+    import sys
+    sys.path.append("../")
 from nets.parallel_backbone import Backbone, ParallelStage, Conv
 from nets.yolo_training import weights_init
 from utils.utils_bbox import make_anchors
